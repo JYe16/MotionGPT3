@@ -1,6 +1,6 @@
 **/__pycache__/**
 *.pyc
-
+deps/
 code_for_demo/
 demos/
 experiments/
@@ -15,3 +15,6 @@ README0.md
 # assets/*
 test_folder.py
 ig-*.py
+datasets/
+checkpoints/
+cache/

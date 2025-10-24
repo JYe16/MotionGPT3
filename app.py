@@ -34,7 +34,7 @@ else:
     device = torch.device("cpu")
 datamodule = build_data(cfg, phase="test")
 model = build_model(cfg, datamodule).eval()
-state_dict = torch.load(cfg.TEST.CHECKPOINTS, map_location="cpu")["state_dict"]
+state_dict = torch.load(cfg.TEST.CHECKPOINTS, map_location="cpu")["state_dict"]["state_dict"]
 model.load_state_dict(state_dict)
 model.to(device)
 
@@ -127,7 +127,7 @@ def render_motion(data, feats, method='fast'):
 
         # out = np.stack(vid, axis=0)
         out_video = mp.ImageSequenceClip(vid, fps=model.fps)
-        out_video.write_videofile(output_mp4_path,fps=model.fps)
+        out_video.write_videofile(output_mp4_path, fps=model.fps)
         del render
 
     elif method == 'fast':
@@ -150,7 +150,7 @@ def motion_feats_to_tokens(motion_feat, motion_encode_net, length=None):
         length = motion_feat.shape[-2]
     dist = motion_encode_net.encode_dist(motion_feat.to(motion_feat.device), [length])
     z, _ = motion_encode_net.encode_dist2z(dist)
-    motion_token_input = z.permute(1,0,2).mul_(motion_encode_net.mean_std_inv)
+    motion_token_input = z.permute(1, 0, 2).mul_(motion_encode_net.mean_std_inv)
     return motion_token_input
 
 
@@ -166,7 +166,6 @@ def load_motion(motion_uploaded, method):
     # # Motion encoding
     # motion_tokens_input, _ = model.vae.encode(motion_feat.unsqueeze(0), motion_length)
     motion_tokens_input = motion_feats_to_tokens(motion_feat, model.vae, motion_length)
-
 
     # motion_token_string = model.lm.motion_token_to_string(
     #     motion_token, [motion_token.shape[1]])[0]
@@ -249,7 +248,6 @@ def add_file(history, file, txt, motion_uploaded):
 
 
 def bot(history, motion_uploaded, data_stored, method, task='t2m'):
-
     motion_length = motion_uploaded["motion_lengths"]
     motion_tokens_input = motion_uploaded['motion_tokens_input']
 
@@ -350,7 +348,6 @@ with open("assets/css/custom.css", "r", encoding="utf-8") as f:
     print('customCSS')
 
 with gr.Blocks(css=customCSS) as demo:
-
     # Examples
     chat_instruct = gr.State([
         (None,
@@ -444,7 +441,7 @@ with gr.Blocks(css=customCSS) as demo:
          Video_Components_example.format(
              video_path="assets/videos/t2m/example9.mp4",
              video_fname="example9.mp4")),
-             
+
     ])
 
     m2t_examples = gr.State([
@@ -463,56 +460,56 @@ with gr.Blocks(css=customCSS) as demo:
             video_path="assets/videos/m2t/1_out.mp4",
             video_fname="example4.mp4"),
          "Person walks in a circular pattern, stopping at the end of the path."
-         ),
+        ),
         ("Provide a summary of the motion demonstrated in <Motion_Placeholder> using words.",
          None),
         (Video_Components_example.format(
             video_path="assets/videos/m2t/example2.mp4",
             video_fname="example2.mp4"),
          " "
-         ),
+        ),
         ("Generate text for <Motion_Placeholder>:", None),
         (Video_Components_example.format(
             video_path="assets/videos/m2t/12_out.mp4",
             video_fname="example5.mp4"),
          "a person reaches down to pick something up and then puts it in front of them"
-         ),
+        ),
         ("Provide a summary of the motion depicted in <Motion_Placeholder> using language.",
          None),
         (Video_Components_example.format(
             video_path="assets/videos/m2t/17_out.mp4",
             video_fname="example6.mp4"),
          "the man darts forward, waits for several steps, then runs again."
-         ),
+        ),
         ("Describe the motion represented by <Motion_Placeholder> in plain English.",
          None),
         (Video_Components_example.format(
             video_path="assets/videos/m2t/18_out.mp4",
             video_fname="example7.mp4"),
          "jumping left to right."
-         ),
+        ),
         ("Provide a description of the action in <Motion_Placeholder> using words.",
          None),
         (Video_Components_example.format(
             video_path="assets/videos/m2t/20_out.mp4",
             video_fname="example8.mp4"),
          "he is throwing something with right hand"
-         ),
+        ),
         (Video_Components_example.format(
             video_path="assets/videos/m2t/27_out.mp4",
             video_fname="example8.mp4"),
          "a person is pushed backwards slightly."
-         ),
+        ),
         (Video_Components_example.format(
             video_path="assets/videos/m2t/30_out.mp4",
             video_fname="example8.mp4"),
          "a person walks forward while using their left arm to balance themselves."
-         ),
+        ),
         (Video_Components_example.format(
             video_path="assets/videos/m2t/32_out.mp4",
             video_fname="example8.mp4"),
          "a person bends over and crawls 180 degrees, then gets down on all fours."
-         ),
+        ),
     ])
 
     t2t_examples = gr.State([
@@ -539,8 +536,9 @@ with gr.Blocks(css=customCSS) as demo:
 
     Init_chatbot = chat_instruct.value[:
                                        1] + t2m_examples.value[:
-                                                               3] + m2t_examples.value[:3] + t2t_examples.value[:2] + chat_instruct.value[
-                                                                   -7:]
+                                                               3] + m2t_examples.value[:3] + t2t_examples.value[
+                                                                                             :2] + chat_instruct.value[
+                                                                                                   -7:]
 
     # Variables
     motion_uploaded = gr.State({
@@ -599,10 +597,10 @@ with gr.Blocks(css=customCSS) as demo:
 
         with gr.Column(scale=0.15, min_width=150):
             task = gr.Dropdown(["t2m", "m2t", "t2t", "pred", "inbetween"],
-                                    label="task",
-                                    interactive=True,
-                                    elem_id="task",
-                                    value="t2m")
+                               label="task",
+                               interactive=True,
+                               elem_id="task",
+                               value="t2m")
             method = gr.Dropdown(["slow", "fast"],
                                  label="Visulization method",
                                  interactive=True,
