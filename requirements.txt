@@ -34,3 +34,6 @@ torchtext==0.15.0
 tqdm==4.67.1
 transformers==4.47.1
 trimesh==3.9.24
+tensorboardX==2.6.4
+tensorboard==2.20.0
+wandb==0.22.2
