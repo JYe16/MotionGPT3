@@ -8,6 +8,7 @@ from motGPT.models.build_model import build_model
 from motGPT.utils.logger import create_logger
 from motGPT.utils.load_checkpoint import load_pretrained, load_pretrained_vae
 
+
 def main():
     # Configs
     cfg = parse_args(phase="train")  # parse config file
@@ -45,7 +46,7 @@ def main():
 
     # Seed
     pl.seed_everything(cfg.SEED_VALUE)
-    
+
     # Lightning Trainer
     trainer = pl.Trainer(
         default_root_dir=cfg.FOLDER_EXP,

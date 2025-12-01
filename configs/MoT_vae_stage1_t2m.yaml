@@ -35,7 +35,7 @@ TRAIN:
   instruction_type: t2m # all, t2m, m2t
   #---------------------------------
   NUM_WORKERS: 8 # Number of workers
-  BATCH_SIZE: 32 # Size of batches
+  BATCH_SIZE: 16 # Size of batches
   # accumulate_grad_batches: 2
   END_EPOCH: 300 # End epoch
   # RESUME: '' # Resume training from this path

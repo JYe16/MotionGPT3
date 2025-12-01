@@ -1,0 +1,60 @@
+NAME: Custom_M2T_Training
+ACCELERATOR: 'gpu'
+DEVICE: [0]
+
+TRAIN:
+  # 使用我们自定义的 STAGE 名称来触发 Text2MotionDatasetTokenCustom
+  STAGE: token_custom
+  instruction_type: m2t
+  BATCH_SIZE: 32
+  END_EPOCH: 200
+  LR_SCHEDULER:
+    target: CosineAnnealingLR
+    params:
+      T_max: 200
+      eta_min: 1e-6
+  OPTIM:
+    target: AdamW
+    params:
+      lr: 1e-4
+      weight_decay: 0.01
+
+DATASET:
+  # 指向我们新建的 DataModule
+  target: motGPT.data.HumanML3D_custom.HumanML3DDataModuleCustom
+  # 你的 token 文件夹名称或路径 (相对于 DATASET.HUMANML3D.ROOT 或绝对路径)
+  # 假设你的数据结构是 data/humanml3d_263/motion_tokens
+  CODE_PATH: motion_tokens 
+  HUMANML3D:
+    ROOT: ../data/humanml3d_263/
+    FPS: 20
+    MIN_MOTION_LEN: 20
+    MAX_MOTION_LEN: 196
+
+model:
+  target: motGPT.models.motgpt.MotGPT
+  params:
+    condition: 'motion'
+    task: 'm2t'
+    lm:
+      target: motGPT.archs.mgpt_lm.MGPTLM
+      params:
+        # 修改这里以匹配你 VQ-VAE 的码本大小 (例如 512 或 1024)
+        nb_code: 512
+        vocab_size: 1024 # MotionGPT 默认词表大小
+    motion_vae:
+      target: motGPT.archs.mld_vae.MldVae
+      params:
+        # 修改这里以匹配你 VQ-VAE 的码本大小
+        nb_code: 512
+        code_dim: 256
+        
+LOSS:
+  LAMBDA_CLS: 1.0
+
+METRIC:
+  TYPE: ['M2TMetrics']
+
+LOGGER:
+  TYPE: ['tensorboard']
+  VAL_EVERY_STEPS: 200
