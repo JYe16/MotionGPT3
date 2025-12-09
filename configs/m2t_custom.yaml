@@ -1,6 +1,7 @@
 NAME: Custom_M2T_Training
 ACCELERATOR: 'gpu'
 DEVICE: [0]
+NUM_NODES: 1
 
 TRAIN:
   # 使用我们自定义的 STAGE 名称来触发 Text2MotionDatasetTokenCustom
@@ -24,9 +25,9 @@ DATASET:
   target: motGPT.data.HumanML3D_custom.HumanML3DDataModuleCustom
   # 你的 token 文件夹名称或路径 (相对于 DATASET.HUMANML3D.ROOT 或绝对路径)
   # 假设你的数据结构是 data/humanml3d_263/motion_tokens
-  CODE_PATH: motion_tokens 
+  CODE_PATH: motion_tokens_ser0.4
   HUMANML3D:
-    ROOT: /orange/sgao1/jackieye/code/llm-sensing/data/humanml3d_263/
+    ROOT: ../../llm-sensing/data/humanml3d_263/
     FPS: 20
     MIN_MOTION_LEN: 20
     MAX_MOTION_LEN: 196
