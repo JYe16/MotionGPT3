@@ -38,17 +38,24 @@ model:
     condition: 'motion'
     task: 'm2t'
     lm:
-      target: motGPT.archs.mgpt_lm.MGPTLM
+      target: motGPT.archs.mgpt_lm.MLM
       params:
+        model_type: gpt2
+        model_path: deps/gpt2
+        stage: ${TRAIN.STAGE}
+        ablation: ${ABLATION}
         # 修改这里以匹配你 VQ-VAE 的码本大小 (例如 512 或 1024)
-        nb_code: 512
+        motion_codebook_size: 512
         vocab_size: 1024 # MotionGPT 默认词表大小
     motion_vae:
       target: motGPT.archs.mld_vae.MldVae
       params:
         # 修改这里以匹配你 VQ-VAE 的码本大小
-        nb_code: 512
+        code_num: 512
         code_dim: 256
+        nfeats: ${DATASET.NFEATS}
+        ablation: ${ABLATION}
+        datatype: ${DATASET.target}
         
 LOSS:
   LAMBDA_CLS: 1.0
