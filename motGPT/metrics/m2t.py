@@ -233,54 +233,58 @@ class M2TMetrics(Metric):
 
         # Cat cached batches and shuffle
         shuffle_idx = torch.randperm(count_seq)
-        all_motions = torch.cat(self.gtmotion_embeddings,
-                                axis=0).cpu()[shuffle_idx, :]
-        all_gttexts = torch.cat(self.gttext_embeddings,
-                                axis=0).cpu()[shuffle_idx, :]
         all_predtexts = torch.cat(self.predtext_embeddings,
                                   axis=0).cpu()[shuffle_idx, :]
+
+        if len(self.gtmotion_embeddings) > 0:
+            all_motions = torch.cat(self.gtmotion_embeddings,
+                                    axis=0).cpu()[shuffle_idx, :]
+            all_gttexts = torch.cat(self.gttext_embeddings,
+                                    axis=0).cpu()[shuffle_idx, :]
 
         print("Computing metrics...")
 
         # Compute r-precision
-        assert count_seq >= self.R_size
-        top_k_mat = torch.zeros((self.top_k, ))
-        for i in range(count_seq // self.R_size):
-            # [bs=32, 1*256]
-            group_texts = all_predtexts[i * self.R_size:(i + 1) * self.R_size]
-            # [bs=32, 1*256]
-            group_motions = all_motions[i * self.R_size:(i + 1) * self.R_size]
-            # [bs=32, 32]
-            dist_mat = euclidean_distance_matrix(group_texts,
-                                                 group_motions).nan_to_num()
-            # print(dist_mat[:5])
-            self.Matching_score += dist_mat.trace()
-            argsmax = torch.argsort(dist_mat, dim=1)
-            top_k_mat += calculate_top_k(argsmax, top_k=self.top_k).sum(axis=0)
+        if len(self.gtmotion_embeddings) > 0:
+            assert count_seq >= self.R_size
+            top_k_mat = torch.zeros((self.top_k, ))
+            for i in range(count_seq // self.R_size):
+                # [bs=32, 1*256]
+                group_texts = all_predtexts[i * self.R_size:(i + 1) * self.R_size]
+                # [bs=32, 1*256]
+                group_motions = all_motions[i * self.R_size:(i + 1) * self.R_size]
+                # [bs=32, 32]
+                dist_mat = euclidean_distance_matrix(group_texts,
+                                                     group_motions).nan_to_num()
+                # print(dist_mat[:5])
+                self.Matching_score += dist_mat.trace()
+                argsmax = torch.argsort(dist_mat, dim=1)
+                top_k_mat += calculate_top_k(argsmax, top_k=self.top_k).sum(axis=0)
 
-        R_count = count_seq // self.R_size * self.R_size
-        metrics["Matching_score"] = self.Matching_score / R_count
-        for k in range(self.top_k):
-            metrics[f"R_precision_top_{str(k+1)}"] = top_k_mat[k] / R_count
+            R_count = count_seq // self.R_size * self.R_size
+            metrics["Matching_score"] = self.Matching_score / R_count
+            for k in range(self.top_k):
+                metrics[f"R_precision_top_{str(k+1)}"] = top_k_mat[k] / R_count
 
-        # Compute r-precision with gt
-        assert count_seq >= self.R_size
-        top_k_mat = torch.zeros((self.top_k, ))
-        for i in range(count_seq // self.R_size):
-            # [bs=32, 1*256]
-            group_texts = all_gttexts[i * self.R_size:(i + 1) * self.R_size]
-            # [bs=32, 1*256]
-            group_motions = all_motions[i * self.R_size:(i + 1) * self.R_size]
-            # [bs=32, 32]
-            dist_mat = euclidean_distance_matrix(group_texts,
-                                                 group_motions).nan_to_num()
-            # match score
-            self.gt_Matching_score += dist_mat.trace()
-            argsmax = torch.argsort(dist_mat, dim=1)
-            top_k_mat += calculate_top_k(argsmax, top_k=self.top_k).sum(axis=0)
-        metrics["gt_Matching_score"] = self.gt_Matching_score / R_count
-        for k in range(self.top_k):
-            metrics[f"gt_R_precision_top_{str(k+1)}"] = top_k_mat[k] / R_count
+            # Compute r-precision with gt
+            assert count_seq >= self.R_size
+            top_k_mat = torch.zeros((self.top_k, ))
+            for i in range(count_seq // self.R_size):
+                # [bs=32, 1*256]
+                group_texts = all_gttexts[i * self.R_size:(i + 1) * self.R_size]
+                # [bs=32, 1*256]
+                group_motions = all_motions[i * self.R_size:(i + 1) * self.R_size]
+                # [bs=32, 32]
+                dist_mat = euclidean_distance_matrix(group_texts,
+                                                     group_motions).nan_to_num()
+                # match score
+                self.gt_Matching_score += dist_mat.trace()
+                argsmax = torch.argsort(dist_mat, dim=1)
+                top_k_mat += calculate_top_k(argsmax, top_k=self.top_k).sum(axis=0)
+            
+            metrics["gt_Matching_score"] = self.gt_Matching_score / R_count
+            for k in range(self.top_k):
+                metrics[f"gt_R_precision_top_{str(k+1)}"] = top_k_mat[k] / R_count
 
         # NLP metrics
         scores = self.nlg_evaluator(predictions=self.pred_texts,
@@ -339,18 +343,19 @@ class M2TMetrics(Metric):
         # m_lens = m_lens // self.unit_length
         # ref_emb = self.t2m_motionencoder(ref_mov, m_lens)
         # gtmotion_embeddings = torch.flatten(ref_emb, start_dim=1).detach()
-        gtmotion_embeddings = self.get_motion_embeddings(feats_ref, lengths)
-        self.gtmotion_embeddings.append(gtmotion_embeddings)
-
-        # text encoder
-        gttext_emb = self.t2m_textencoder(word_embs, pos_ohot,
-                                          text_lengths)[align_idx]
-        gttext_embeddings = torch.flatten(gttext_emb, start_dim=1).detach()
         predtext_emb = self._get_text_embeddings(pred_texts)[align_idx]
         predtext_embeddings = torch.flatten(predtext_emb, start_dim=1).detach()
-
-        self.gttext_embeddings.append(gttext_embeddings)
         self.predtext_embeddings.append(predtext_embeddings)
+
+        if word_embs is not None:
+            gtmotion_embeddings = self.get_motion_embeddings(feats_ref, lengths)
+            self.gtmotion_embeddings.append(gtmotion_embeddings)
+
+            # text encoder
+            gttext_emb = self.t2m_textencoder(word_embs, pos_ohot,
+                                              text_lengths)[align_idx]
+            gttext_embeddings = torch.flatten(gttext_emb, start_dim=1).detach()
+            self.gttext_embeddings.append(gttext_embeddings)
 
         self.pred_texts.extend(pred_texts)
         self.gt_texts.extend(gt_texts)

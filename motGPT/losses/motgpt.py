@@ -38,11 +38,12 @@ class MotLosses(BaseLosses):
 
             # losses.append("vq_commit")
             # params['vq_commit'] = cfg.LOSS.LAMBDA_COMMIT
-        elif stage in ["lm_pretrain", "lm_instruct", "lm_finetune", "lm_t2m", 'lm_adaptor_pretrain', 'lm_fixdec']:
+        elif stage in ["lm_pretrain", "lm_instruct", "lm_finetune", "lm_t2m", 'lm_adaptor_pretrain', 'lm_fixdec', 'token_custom']:
             losses.append("gpt_loss")
             params['gpt_loss'] = cfg.LOSS.LAMBDA_CLS
-            losses.append("diff_loss")
-            params['diff_loss'] = cfg.LOSS.LAMBDA_DIFF
+            if hasattr(cfg.LOSS, 'LAMBDA_DIFF'):
+                losses.append("diff_loss")
+                params['diff_loss'] = cfg.LOSS.LAMBDA_DIFF
             # losses.append("boundary_loss")
             # params['boundary_loss'] = cfg.LOSS.LAMBDA_BOUND
 
@@ -139,11 +140,12 @@ class MotLosses(BaseLosses):
             #                            rs_set['loss_commit'])
 
 
-        if self.stage in ["lm_pretrain", "lm_instruct", "lm_finetune", "lm_t2m", 'lm_adaptor_pretrain', 'lm_fixdec']:
+        if self.stage in ["lm_pretrain", "lm_instruct", "lm_finetune", "lm_t2m", 'lm_adaptor_pretrain', 'lm_fixdec', 'token_custom']:
             total += self._update_loss("gpt_loss", rs_set['outputs'].loss,
                                        rs_set['outputs'].loss, coef=gpt_coef)
-            total += self._update_loss("diff_loss", rs_set['outputs'].diff_loss, 
-                                       rs_set['outputs'].diff_loss)
+            if hasattr(rs_set['outputs'], 'diff_loss'):
+                total += self._update_loss("diff_loss", rs_set['outputs'].diff_loss, 
+                                           rs_set['outputs'].diff_loss)
             # self._update_loss('boundary_loss', rs_set['outputs'].boundary_loss, 
             #                     rs_set['outputs'].boundary_loss)
             # if self.predict_epsilon:

@@ -142,6 +142,13 @@ class Text2MotionDatasetTokenCustom(data.Dataset):
         # 我们创建一个 dummy motion，形状为 (m_length, 263)，内容为 0
         dummy_motion = np.zeros((m_length, 263)) 
 
+        # 定义任务
+        task = {
+            "class": "m2t",
+            "input": ["Generate text: <Motion_Placeholder>"],
+            "output": ["<Caption_Placeholder>"]
+        }
+
         # 返回元组顺序参考 dataset_t2m.py:
         # caption, m_tokens, m_tokens_len, motion, m_length, word_embs, pos_ohot, text_len, tokens, all_captions, tasks, fname
         
@@ -156,6 +163,6 @@ class Text2MotionDatasetTokenCustom(data.Dataset):
             None,           # text_len
             None,           # tokens
             all_captions,   # all_captions
-            None,           # tasks
+            task,           # tasks
             fname           # fname
         )

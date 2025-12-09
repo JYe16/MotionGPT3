@@ -163,7 +163,14 @@ class MotGPT(BaseModel):
 
         # motion_tokens = self.vae.encode(tokens_ref, lengths)
         # LLM Forward
-        outputs = self.lm(texts, feats_ref, self.vae, lengths, tasks)
+        try:
+            outputs = self.lm(texts, feats_ref, self.vae, lengths, tasks)
+        except TypeError:
+            if "m_tokens" in batch:
+                motion_tokens = batch["m_tokens"].long()
+                outputs = self.lm(texts, motion_tokens, lengths, tasks)
+            else:
+                raise
 
         # coef = sig(self.current_epoch/10.)*2-1
         # outputs.loss  = outputs.loss *coef
@@ -280,11 +287,17 @@ class MotGPT(BaseModel):
 
         # Forward
         with torch.no_grad():
-            outputs = self.lm.generate_conditional(motion_feats=feats_ref,
-                                                motion_encode_net=self.vae,
-                                                lengths=lengths,
-                                                task="m2t",
-                                                stage='test')
+            if "m_tokens" in batch:
+                outputs = self.lm.generate_conditional(motion_tokens=batch["m_tokens"].long(),
+                                                    lengths=lengths,
+                                                    task="m2t",
+                                                    stage='test')
+            else:
+                outputs = self.lm.generate_conditional(motion_feats=feats_ref,
+                                                    motion_encode_net=self.vae,
+                                                    lengths=lengths,
+                                                    task="m2t",
+                                                    stage='test')
 
         feats_ref = self.datamodule.renorm4t2m(feats_ref)
         # return set
@@ -416,7 +429,7 @@ class MotGPT(BaseModel):
         if self.hparams.stage == "vae" and split in ["train", "val"]:
             rs_set = self.train_vae_forward(batch)
             loss = self._losses['losses_' + split].update(rs_set)
-        elif self.hparams.stage in ["lm_instruct", "lm_pretrain", "lm_finetune", "lm_adaptor_pretrain"
+        elif self.hparams.stage in ["lm_instruct", "lm_pretrain", "lm_finetune", "lm_adaptor_pretrain", "token_custom"
                                     ] and split in ["train"]:
             rs_set = self.train_lm_forward(batch)
             # rs_set['diff_loss'] = self.forward_diff_loss(batch["motion"], rs_set['hidden'])
@@ -429,7 +442,7 @@ class MotGPT(BaseModel):
         if split in ["val", "test"]:
             if self.hparams.stage == "vae":
                 rs_set = self.val_vae_forward(batch, split)
-            elif self.hparams.stage in ["lm_instruct", "lm_pretrain", "lm_finetune", "lm_rl", "lm_adaptor_pretrain"]:
+            elif self.hparams.stage in ["lm_instruct", "lm_pretrain", "lm_finetune", "lm_rl", "lm_adaptor_pretrain", "token_custom"]:
                 if self.hparams.task == "t2m":
                     rs_set = self.val_t2m_forward(batch)
                 elif self.hparams.task == "m2t":
@@ -539,7 +552,7 @@ class MotGPT(BaseModel):
                         raise TypeError(f"Not support this metric {metric}")
 
             elif self.hparams.task in ["m2t",'t2t'] and self.hparams.stage in [
-                    "lm_instruct", "lm_pretrain", "lm_finetune", "lm_rl", "lm_adaptor_pretrain"
+                    "lm_instruct", "lm_pretrain", "lm_finetune", "lm_rl", "lm_adaptor_pretrain", "token_custom"
             ]:
                 if batch_idx == 0 and self.global_rank == 0:
                     feats_ref = rs_set['m_ref']
@@ -567,9 +580,9 @@ class MotGPT(BaseModel):
                             pred_texts=rs_set["t_pred"],
                             gt_texts=batch["all_captions"],
                             lengths=rs_set['length'],
-                            word_embs=batch["word_embs"],
-                            pos_ohot=batch["pos_ohot"],
-                            text_lengths=batch["text_len"],
+                            word_embs=batch.get("word_embs"),
+                            pos_ohot=batch.get("pos_ohot"),
+                            text_lengths=batch.get("text_len"),
                         )
 
         # return forward output rather than loss during test
