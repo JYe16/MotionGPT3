@@ -37,3 +37,4 @@ trimesh==3.9.24
 tensorboardX==2.6.4
 tensorboard==2.20.0
 wandb==0.22.2
+smplx==0.1.28

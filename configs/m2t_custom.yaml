@@ -26,7 +26,7 @@ DATASET:
   # 假设你的数据结构是 data/humanml3d_263/motion_tokens
   CODE_PATH: motion_tokens 
   HUMANML3D:
-    ROOT: ../data/humanml3d_263/
+    ROOT: /orange/sgao1/jackieye/code/llm-sensing/data/humanml3d_263/
     FPS: 20
     MIN_MOTION_LEN: 20
     MAX_MOTION_LEN: 196
