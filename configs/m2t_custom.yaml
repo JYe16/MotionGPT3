@@ -22,7 +22,7 @@ TRAIN:
 
 DATASET:
   # 指向我们新建的 DataModule
-  target: motGPT.data.HumanML3D_custom.HumanML3DDataModuleCustom
+  target: motGPT.data.HumanML3D-custom.HumanML3DDataModuleCustom
   # 你的 token 文件夹名称或路径 (相对于 DATASET.HUMANML3D.ROOT 或绝对路径)
   # 假设你的数据结构是 data/humanml3d_263/motion_tokens
   CODE_PATH: motion_tokens_ser0.4
