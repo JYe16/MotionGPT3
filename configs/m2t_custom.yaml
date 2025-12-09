@@ -8,7 +8,7 @@ TEST:
   SPLIT: test
 
 TRAIN:
-  # 使用我们自定义的 STAGE 名称来触发 Text2MotionDatasetTokenCustom
+  # 使用我们自定义的 STAGE 名称来触发 Motion2TextDatasetTokenCustom
   STAGE: token_custom
   instruction_type: m2t
   BATCH_SIZE: 16

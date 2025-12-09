@@ -7,7 +7,7 @@ import random
 import codecs as cs
 from tqdm import tqdm
 
-class Text2MotionDatasetTokenCustom(data.Dataset):
+class Motion2TextDatasetTokenCustom(data.Dataset):
     def __init__(
         self,
         data_root,
@@ -22,8 +22,10 @@ class Text2MotionDatasetTokenCustom(data.Dataset):
         tiny=False,
         debug=False,
         code_path="motion_tokens", # 默认 token 文件夹名
+        w_vectorizer=None,
         **kwargs,
     ):
+        self.w_vectorizer = w_vectorizer
         self.max_motion_length = max_motion_length
         self.min_motion_length = min_motion_length
         self.unit_length = unit_length
@@ -34,6 +36,7 @@ class Text2MotionDatasetTokenCustom(data.Dataset):
         # 路径设置
         split_file = pjoin(data_root, split + '.txt')
         self.text_dir = pjoin(data_root, 'texts')
+        self.motion_dir = pjoin(data_root, 'new_joint_vecs')
         
         # 处理 Token 路径
         # 如果配置中传入了 code_path，使用配置的；否则默认 'motion_tokens'
@@ -126,22 +129,63 @@ class Text2MotionDatasetTokenCustom(data.Dataset):
         if m_length > self.max_motion_length:
             m_tokens = m_tokens[:self.max_motion_length]
             m_length = self.max_motion_length
+
+        # 2. 加载 Motion (用于评估)
+        motion_file = pjoin(self.motion_dir, fname + '.npy')
+        if os.path.exists(motion_file):
+            motion = np.load(motion_file)
+            motion = (motion - self.mean) / self.std
+            motion_len = len(motion)
+            # 简单截断以匹配 token (假设大致对应，或者评估时只用前一段)
+            # 注意：这里没有严格对齐 token 和 motion 的裁剪，因为 token 可能是 VQ 后的
+            # 但对于 R-Precision，只要是同一个动作即可
+            if motion_len > self.max_motion_length:
+                motion = motion[:self.max_motion_length]
+                motion_len = self.max_motion_length
+        else:
+            # Fallback
+            motion = np.zeros((m_length * 4, 263))
+            motion_len = m_length * 4
             
-        # 2. 加载 Text
+        # 3. 加载 Text
         text_list = data['text']
         
         # 训练时随机选择一条文本，测试时通常也随机，或者在评估代码中处理多条
         text_data = random.choice(text_list)
         caption = text_data['caption']
+        tokens = text_data['tokens']
+
+        # Process text if w_vectorizer is available
+        word_embeddings = None
+        pos_one_hots = None
+        sent_len = None
+        
+        if self.w_vectorizer is not None:
+            max_text_len = 20
+            if len(tokens) < max_text_len:
+                tokens_padded = ["sos/OTHER"] + tokens + ["eos/OTHER"]
+                sent_len = len(tokens_padded)
+                tokens_padded = tokens_padded + ["unk/OTHER"] * (max_text_len + 2 - sent_len)
+            else:
+                tokens_padded = tokens[:max_text_len]
+                tokens_padded = ["sos/OTHER"] + tokens_padded + ["eos/OTHER"]
+                sent_len = len(tokens_padded)
+            
+            pos_one_hots_list = []
+            word_embeddings_list = []
+            for token in tokens_padded:
+                word_emb, pos_oh = self.w_vectorizer[token]
+                pos_one_hots_list.append(pos_oh[None, :])
+                word_embeddings_list.append(word_emb[None, :])
+            pos_one_hots = np.concatenate(pos_one_hots_list, axis=0)
+            word_embeddings = np.concatenate(word_embeddings_list, axis=0)
         
         # 获取所有 caption (用于评估)
         all_captions = [x['caption'] for x in text_list]
 
         # 3. 构造返回值 (适配 MotionGPT3 collate_fn)
         # 即使是 M2T 任务，collate_fn 可能仍期望 motion tensor 的存在
-        # 我们创建一个 dummy motion，形状为 (m_length, 263)，内容为 0
-        dummy_motion = np.zeros((m_length, 263)) 
-
+        
         # 定义任务
         task = {
             "class": "m2t",
@@ -156,11 +200,11 @@ class Text2MotionDatasetTokenCustom(data.Dataset):
             caption,        # caption
             m_tokens,       # m_tokens (INPUT)
             m_length,       # m_tokens_len
-            dummy_motion,   # motion (ignored for training but needed for shape)
-            m_length,       # m_length
-            None,           # word_embs
-            None,           # pos_ohot
-            None,           # text_len
+            motion,         # motion (Real Motion)
+            motion_len,     # length (Frame Length)
+            word_embeddings,# word_embs
+            pos_one_hots,   # pos_ohot
+            sent_len,       # text_len
             None,           # tokens
             all_captions,   # all_captions
             task,           # tasks

@@ -168,7 +168,8 @@ class MotGPT(BaseModel):
         except TypeError:
             if "m_tokens" in batch:
                 motion_tokens = batch["m_tokens"].long()
-                outputs = self.lm(texts, motion_tokens, lengths, tasks)
+                lm_lengths = batch.get("m_tokens_len", lengths)
+                outputs = self.lm(texts, motion_tokens, lm_lengths, tasks)
             else:
                 raise
 
@@ -288,8 +289,9 @@ class MotGPT(BaseModel):
         # Forward
         with torch.no_grad():
             if "m_tokens" in batch:
+                lm_lengths = batch.get("m_tokens_len", lengths)
                 outputs = self.lm.generate_conditional(motion_tokens=batch["m_tokens"].long(),
-                                                    lengths=lengths,
+                                                    lengths=lm_lengths,
                                                     task="m2t",
                                                     stage='test')
             else:
