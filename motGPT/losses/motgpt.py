@@ -38,7 +38,7 @@ class MotLosses(BaseLosses):
 
             # losses.append("vq_commit")
             # params['vq_commit'] = cfg.LOSS.LAMBDA_COMMIT
-        elif stage in ["lm_pretrain", "lm_instruct", "lm_finetune", "lm_t2m", 'lm_adaptor_pretrain', 'lm_fixdec', 'token_custom']:
+        elif stage in ["lm_pretrain", "lm_instruct", "lm_finetune", "lm_t2m", 'lm_adaptor_pretrain', 'lm_fixdec', 'token_custom', 'lm_token_custom']:
             losses.append("gpt_loss")
             params['gpt_loss'] = cfg.LOSS.LAMBDA_CLS
             if hasattr(cfg.LOSS, 'LAMBDA_DIFF'):
@@ -140,7 +140,7 @@ class MotLosses(BaseLosses):
             #                            rs_set['loss_commit'])
 
 
-        if self.stage in ["lm_pretrain", "lm_instruct", "lm_finetune", "lm_t2m", 'lm_adaptor_pretrain', 'lm_fixdec', 'token_custom']:
+        if self.stage in ["lm_pretrain", "lm_instruct", "lm_finetune", "lm_t2m", 'lm_adaptor_pretrain', 'lm_fixdec', 'token_custom', 'lm_token_custom']:
             total += self._update_loss("gpt_loss", rs_set['outputs'].loss,
                                        rs_set['outputs'].loss, coef=gpt_coef)
             if hasattr(rs_set['outputs'], 'diff_loss'):

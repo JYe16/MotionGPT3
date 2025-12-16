@@ -8,11 +8,11 @@ TEST:
   SPLIT: test
 
 TRAIN:
-  # 使用我们自定义的 STAGE 名称来触发 Motion2TextDatasetTokenCustom
-  STAGE: token_custom
+  # 使用包含 'lm' 的 STAGE 名称来触发 VAE 冻结逻辑
+  STAGE: lm_token_custom
   instruction_type: m2t
-  BATCH_SIZE: 256
-  END_EPOCH: 200
+  BATCH_SIZE: 20
+  END_EPOCH: 100
   LR_SCHEDULER:
     target: CosineAnnealingLR
     params:
@@ -52,7 +52,7 @@ model:
         ablation: ${ABLATION}
         # 修改这里以匹配你 VQ-VAE 的码本大小 (例如 512 或 1024)
         motion_codebook_size: 512
-        vocab_size: 1024 # MotionGPT 默认词表大小
+        vocab_size: 512 # MotionGPT 默认词表大小
     motion_vae:
       target: motGPT.archs.mld_vae.MldVae
       params:
@@ -71,4 +71,4 @@ METRIC:
 
 LOGGER:
   TYPE: ['tensorboard']
-  VAL_EVERY_STEPS: 200
+  VAL_EVERY_STEPS: 1  # Validate every epoch

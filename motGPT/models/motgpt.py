@@ -431,7 +431,7 @@ class MotGPT(BaseModel):
         if self.hparams.stage == "vae" and split in ["train", "val"]:
             rs_set = self.train_vae_forward(batch)
             loss = self._losses['losses_' + split].update(rs_set)
-        elif self.hparams.stage in ["lm_instruct", "lm_pretrain", "lm_finetune", "lm_adaptor_pretrain", "token_custom"
+        elif self.hparams.stage in ["lm_instruct", "lm_pretrain", "lm_finetune", "lm_adaptor_pretrain", "token_custom", "lm_token_custom"
                                     ] and split in ["train"]:
             rs_set = self.train_lm_forward(batch)
             # rs_set['diff_loss'] = self.forward_diff_loss(batch["motion"], rs_set['hidden'])
@@ -444,7 +444,7 @@ class MotGPT(BaseModel):
         if split in ["val", "test"]:
             if self.hparams.stage == "vae":
                 rs_set = self.val_vae_forward(batch, split)
-            elif self.hparams.stage in ["lm_instruct", "lm_pretrain", "lm_finetune", "lm_rl", "lm_adaptor_pretrain", "token_custom"]:
+            elif self.hparams.stage in ["lm_instruct", "lm_pretrain", "lm_finetune", "lm_rl", "lm_adaptor_pretrain", "token_custom", "lm_token_custom"]:
                 if self.hparams.task == "t2m":
                     rs_set = self.val_t2m_forward(batch)
                 elif self.hparams.task == "m2t":
@@ -494,7 +494,7 @@ class MotGPT(BaseModel):
                                                rs_set["joints_ref"], lengths)
                     elif metric == "TM2TMetrics":
                         if self.hparams.stage in [
-                                "lm_instruct", "lm_pretrain", "lm_rl", "lm_adaptor_pretrain"
+                                "lm_instruct", "lm_pretrain", "lm_rl", "lm_adaptor_pretrain", "lm_token_custom"
                         ]:
                             word_embs = batch['word_embs']
                             pos_ohot = batch['pos_ohot']
@@ -554,7 +554,7 @@ class MotGPT(BaseModel):
                         raise TypeError(f"Not support this metric {metric}")
 
             elif self.hparams.task in ["m2t",'t2t'] and self.hparams.stage in [
-                    "lm_instruct", "lm_pretrain", "lm_finetune", "lm_rl", "lm_adaptor_pretrain", "token_custom"
+                    "lm_instruct", "lm_pretrain", "lm_finetune", "lm_rl", "lm_adaptor_pretrain", "token_custom", "lm_token_custom"
             ]:
                 if batch_idx == 0 and self.global_rank == 0:
                     feats_ref = rs_set['m_ref']
