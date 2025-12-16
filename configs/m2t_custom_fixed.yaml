@@ -25,13 +25,15 @@ TRAIN:
       weight_decay: 0.01
 
 DATASET:
-  # 指向我们新建的 DataModule
-  target: motGPT.data.HumanML3D-custom.HumanML3DDataModuleCustom
+  # 指向我们新建的 DataModule (Fixed module name)
+  target: motGPT.data.HumanML3D_custom.HumanML3DDataModuleCustom
   # 你的 token 文件夹名称或路径 (相对于 DATASET.HUMANML3D.ROOT 或绝对路径)
   # 假设你的数据结构是 data/humanml3d_263/motion_tokens
-  CODE_PATH: motion_tokens_ser0.4
+  # CODE_PATH: motion_tokens_ser0.4 # User's original path
+  CODE_PATH: motion_tokens_st_share # Using available path for verification
   HUMANML3D:
-    ROOT: ../../llm-sensing/data/humanml3d_263/
+    ROOT: ../../llm-sensing/data/humanml3d_263/ # User's original path
+    # ROOT: datasets/humanml3d/ # Using workspace path
     FPS: 20
     MIN_MOTION_LEN: 20
     MAX_MOTION_LEN: 196
@@ -56,7 +58,7 @@ model:
       params:
         # 修改这里以匹配你 VQ-VAE 的码本大小
         code_num: 512
-        code_dim: 256
+        code_dim: 512
         nfeats: ${DATASET.NFEATS}
         ablation: ${ABLATION}
         datatype: ${DATASET.target}
