@@ -169,21 +169,19 @@ class Motion2TextDatasetTokenCustom(data.Dataset):
         pos_one_hots = np.concatenate(pos_one_hots, axis=0)
         word_embeddings = np.concatenate(word_embeddings, axis=0)
 
-        # 3. 加载 Motion (用于评估) - 与 eval_v3 相同的处理逻辑
+        # 3. 加载 Motion (用于评估)
         motion_file = pjoin(self.motion_dir, fname + '.npy')
         if os.path.exists(motion_file):
             motion = np.load(motion_file)
             
-            # Random crop - 与 eval_v3 完全相同
+            # 对于 M2T 任务，motion 应该和 token 对应
+            # Token 是从完整 motion 编码的，所以这里不做 random crop
+            # 只做长度对齐和归一化
             m_length = motion.shape[0]
-            coin = np.random.choice([False, False, True])
-            if coin:
-                m_length = (m_length // self.unit_length - 1) * self.unit_length
-            else:
-                m_length = (m_length // self.unit_length) * self.unit_length
             
-            idx = random.randint(0, len(motion) - m_length)
-            motion = motion[idx:idx + m_length]
+            # 对齐到 unit_length 的倍数
+            m_length = (m_length // self.unit_length) * self.unit_length
+            motion = motion[:m_length]
 
             # Z Normalization
             motion = (motion - self.mean) / self.std

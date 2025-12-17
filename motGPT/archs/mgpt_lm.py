@@ -380,15 +380,36 @@ class MLM(nn.Module):
                 # bad_words_ids=self.bad_words_ids
             )
             
+            # Debug: print first few raw outputs to understand the format
+            if stage in ['test', 'val'] and len(cleaned_text) > 0:
+                print(f"\n[DEBUG M2T] Raw output sample: {repr(cleaned_text[0][:200] if len(cleaned_text[0]) > 200 else cleaned_text[0])}")
+            
             # Clean up the prompt prefix from generated text (for test/eval/val stage)
             if stage in ['test', 'val']:
                 cleaned_text_final = []
                 for text in cleaned_text:
+                    # The text format is like: "Generate text: <Motion_Placeholder> \n actual_description"
+                    # We need to extract only the actual description part
+                    
+                    # Try to find content after " \n " (the separator used in GPT2 decoder)
+                    if ' \n ' in text:
+                        text = text.split(' \n ', 1)[-1]
+                    
                     # Remove "Generate text: <Motion_Placeholder>" prefix and variants
                     text = text.replace('Generate text: <Motion_Placeholder>', '').strip()
                     text = text.replace('Generate text with', '').strip()
-                    # Remove any leading " \n " that might remain
-                    text = text.lstrip(' \n')
+                    text = text.replace('<Motion_Placeholder>', '').strip()
+                    
+                    # Remove frame placeholder patterns like "196 frames:"
+                    import re
+                    text = re.sub(r'^\d+\s*frames?:?\s*', '', text)
+                    
+                    # Remove any leading/trailing whitespace and newlines
+                    text = text.strip(' \n\t')
+                    
+                    # Remove surrounding quotes (both single and double)
+                    text = text.strip('"\'')
+                    
                     cleaned_text_final.append(text)
                 return cleaned_text_final
             
