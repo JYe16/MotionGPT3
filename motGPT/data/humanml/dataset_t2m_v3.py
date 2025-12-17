@@ -51,7 +51,7 @@ class Text2MotionDatasetCBV3(data.Dataset):
         instruction_type = '' if (instruction_type == 'all') else '_'+instruction_type
         if task_path:
             instructions = task_path
-        elif stage in ['lm_pretrain','lm_adaptor_pretrain', "lm_t2m", "lm_token_custom"]:
+        elif stage in ['lm_pretrain','lm_adaptor_pretrain', "lm_t2m"]:
             instructions = pjoin(data_root, f'template{instruction_type}_pretrain.json')
         elif stage in ['lm_instruct', "lm_rl", "lm_finetune"]:
             instructions = pjoin(data_root, f'template{instruction_type}_instructions.json')

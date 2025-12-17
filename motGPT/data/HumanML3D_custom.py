@@ -7,8 +7,8 @@ class HumanML3DDataModuleCustom(HumanML3DDataModule):
         super().__init__(cfg, **kwargs)
         
         # 覆盖 Dataset 类选择逻辑
-        # 支持 "token_custom" 和 "lm_token_custom" 两种 STAGE 名称
-        if cfg.TRAIN.STAGE in ["token_custom", "lm_token_custom"]:
+        # 我们定义一个新的 STAGE 名称: "token_custom"
+        if cfg.TRAIN.STAGE == "token_custom":
             print("[DataModule] Using Custom Token Dataset for M2T Training")
             self.Dataset = Motion2TextDatasetTokenCustom
             self.DatasetEval = Motion2TextDatasetTokenCustom

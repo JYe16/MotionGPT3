@@ -200,23 +200,15 @@ class MLM(nn.Module):
 
         if condition == 'text':
             labels = texts
-            prompt_lengths = None  # No prompt to mask
         elif condition == 'motion':
             labels = motion_strings
-            prompt_lengths = None  # No prompt to mask
         else:
-            inputs_text, outputs_text = self.template_fulfill(tasks, lengths,
+            inputs, outputs = self.template_fulfill(tasks, lengths,
                                                     motion_strings, texts)
             labels = []
-            prompt_lengths = []  # Track prompt lengths for masking
-            for i in range(len(inputs_text)):
-                # Build the full sequence: prompt + separator + output + eos
-                full_seq = inputs_text[i] + ' \n ' + outputs_text[i] + self.tokenizer.eos_token
-                labels.append(full_seq)
-                # Calculate prompt length (including the separator " \n ")
-                prompt_with_sep = inputs_text[i] + ' \n '
-                prompt_tokens = self.tokenizer(prompt_with_sep, add_special_tokens=False)
-                prompt_lengths.append(len(prompt_tokens.input_ids))
+            for i in range(len(inputs)):
+                labels.append(inputs[i] + ' \n ' + outputs[i] +
+                              self.tokenizer.eos_token)
 
         # Tokenize
         inputs = self.tokenizer(labels,
@@ -226,26 +218,11 @@ class MLM(nn.Module):
                                 return_attention_mask=True,
                                 return_tensors="pt")
 
-        input_ids = inputs.input_ids.to(motion_tokens.device)
-        attention_mask = inputs.attention_mask.to(motion_tokens.device)
-        
-        # Create labels for loss computation
-        labels_for_loss = input_ids.clone()
-        
-        # Mask prompt tokens in labels (set to -100 so they are ignored in loss)
-        if prompt_lengths is not None:
-            for i, prompt_len in enumerate(prompt_lengths):
-                # Set prompt tokens to -100 (ignored by CrossEntropyLoss)
-                # Note: We mask tokens [0, prompt_len-1], the model predicts [1, prompt_len]
-                # So we mask labels[0:prompt_len] to ignore loss for predicting prompt tokens
-                labels_for_loss[i, :prompt_len] = -100
-        
-        # Also mask padding tokens
-        labels_for_loss[labels_for_loss == self.tokenizer.pad_token_id] = -100
-        
-        outputs = self.language_model(input_ids=input_ids,
-                                      attention_mask=attention_mask,
-                                      labels=labels_for_loss)
+        labels_input_ids = inputs.input_ids.to(motion_tokens.device)
+        lables_attention_mask = inputs.attention_mask.to(motion_tokens.device)
+        outputs = self.language_model(input_ids=labels_input_ids,
+                                      attention_mask=lables_attention_mask,
+                                      labels=inputs["input_ids"])
 
         return outputs
 
@@ -254,8 +231,7 @@ class MLM(nn.Module):
                         max_length: int = 256,
                         num_beams: int = 1,
                         do_sample: bool = True,
-                        bad_words_ids: List[int] = None,
-                        repetition_penalty: float = 1.0):
+                        bad_words_ids: List[int] = None):
 
         # Device
         self.device = self.language_model.device
@@ -284,15 +260,13 @@ class MLM(nn.Module):
                 bad_words_ids=bad_words_ids,
             )
         elif self.lm_type == 'dec':
-            # Use left padding for decoder-only generation
-            self.tokenizer.padding_side = 'left'
             outputs = self.language_model.generate(
                 input_ids=source_input_ids,
                 attention_mask=source_attention_mask,
                 pad_token_id=self.tokenizer.pad_token_id,
                 do_sample=do_sample,
-                max_new_tokens=max_length,
-                repetition_penalty=repetition_penalty)
+                max_new_tokens=max_length)
+            self.tokenizer.padding_side = 'left'
 
         outputs_string = self.tokenizer.batch_decode(outputs,
                                                      skip_special_tokens=True)
@@ -403,31 +377,9 @@ class MLM(nn.Module):
                 max_length=40,
                 num_beams=1,
                 do_sample=False,
-                repetition_penalty=1.2,  # Penalize repetition
                 # bad_words_ids=self.bad_words_ids
             )
-            
-            # For M2T task, extract the actual generated text after the "\n" separator
-            # The output format is: "Generate text: <Motion_Placeholder> \n <generated_text>"
-            final_texts = []
-            for text in cleaned_text:
-                # Split by the separator and take the generated part
-                if '\n' in text:
-                    parts = text.split('\n', 1)
-                    generated_part = parts[1].strip() if len(parts) > 1 else ""
-                    # Remove quotes if present
-                    if generated_part.startswith('"') and generated_part.endswith('"'):
-                        generated_part = generated_part[1:-1]
-                    final_texts.append(generated_part)
-                else:
-                    # Fallback: try to extract text after <Motion_Placeholder>
-                    if '<Motion_Placeholder>' in text:
-                        generated_part = text.split('<Motion_Placeholder>')[-1].strip()
-                    else:
-                        generated_part = text.strip()
-                    final_texts.append(generated_part)
-            
-            return final_texts
+            return cleaned_text
 
     def motion_token_to_string(self, motion_token: Tensor, lengths: List[int]):
         motion_string = []

@@ -63,54 +63,10 @@ class BaseModel(LightningModule):
         dico.update(self.loss_log_dict('train'))
         dico.update(self.loss_log_dict('val'))
         # Log metrics
-        metrics_dict = self.metrics_log_dict()
-        dico.update(metrics_dict)
+        dico.update(self.metrics_log_dict())
         # Write to log only if not sanity check
         if not self.trainer.sanity_checking:
             self.log_dict(dico, sync_dist=True, rank_zero_only=True)
-            
-            # Print M2T metrics for real-time monitoring
-            if self.global_rank == 0 and hasattr(self.hparams, 'task') and self.hparams.task == 'm2t':
-                epoch = self.trainer.current_epoch
-                print(f"\n{'='*60}")
-                print(f"Epoch {epoch} - M2T Validation Metrics:")
-                print(f"{'='*60}")
-                
-                # NLG metrics (generated text quality)
-                nlg_keys = ['bleu_1', 'bleu_4', 'ROUGE_L', 'CIDEr', 'Bert_F1']
-                print("  [NLG Metrics - Generated Text Quality]")
-                for key in nlg_keys:
-                    for metric_key, value in metrics_dict.items():
-                        if key in metric_key:
-                            if isinstance(value, float):
-                                print(f"    {key}: {value:.4f}")
-                            else:
-                                print(f"    {key}: {value}")
-                
-                # Matching metrics - Generated text vs Motion
-                print("  [Matching - Generated Text vs Motion]")
-                gen_match_keys = ['Matching_score', 'R_precision_top_1', 'R_precision_top_3']
-                for key in gen_match_keys:
-                    for metric_key, value in metrics_dict.items():
-                        # Match exact key (not gt_ prefixed)
-                        if key in metric_key and 'gt_' not in metric_key:
-                            if isinstance(value, float):
-                                print(f"    {key}: {value:.4f}")
-                            else:
-                                print(f"    {key}: {value}")
-                
-                # Matching metrics - Ground truth text vs Motion (upper bound reference)
-                print("  [Matching - GT Text vs Motion (Upper Bound)]")
-                gt_match_keys = ['gt_Matching_score', 'gt_R_precision_top_1', 'gt_R_precision_top_3']
-                for key in gt_match_keys:
-                    for metric_key, value in metrics_dict.items():
-                        if key in metric_key:
-                            if isinstance(value, float):
-                                print(f"    {key}: {value:.4f}")
-                            else:
-                                print(f"    {key}: {value}")
-                
-                print(f"{'='*60}\n")
 
     def on_test_epoch_end(self):
         # Log metrics

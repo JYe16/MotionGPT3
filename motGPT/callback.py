@@ -123,7 +123,6 @@ def getCheckpointCallback(cfg, logger=None, **kwargs):
     checkpointParams.update({
         'every_n_epochs': cfg.LOGGER.VAL_EVERY_STEPS,
         'save_top_k': 1,
-        'save_on_train_epoch_end': False,  # Only save after validation, not after training epoch
     })
 
     for metric in metrics:
