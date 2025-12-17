@@ -61,8 +61,6 @@ class Motion2TextDatasetTokenCustom(data.Dataset):
             print(f"[Error] Split file not found: {split_file}")
 
         # 数据过滤与加载逻辑
-        # 注意：由于我们使用预量化的 token，只能使用 f_tag=0, to_tag=0 的完整 motion
-        # f_tag/to_tag 裁剪需要实时重新编码 token，这里不支持
         new_name_list = []
         data_dict = {}
         
@@ -74,19 +72,15 @@ class Motion2TextDatasetTokenCustom(data.Dataset):
                 if not os.path.exists(token_file):
                     continue
                 
-                # 2. 加载 Tokens
+                # 2. 检查长度 (快速读取)
                 tokens = np.load(token_file)
                 if len(tokens.shape) > 1:
                     tokens = tokens.flatten()
-
-                # 3. 基于 token 长度过滤 (10-49 tokens -> 3544 samples)
-                token_len = len(tokens)
-                min_token_len = 10  # 对应约 40 帧 motion (40//4=10)
-                max_token_len = self.max_motion_length // self.unit_length  # 196//4=49
-                if token_len < min_token_len or token_len > max_token_len:
+                    
+                if len(tokens) < self.min_motion_length or len(tokens) >= self.max_motion_length:
                     continue
 
-                # 4. 加载文本，只保留 f_tag=0, to_tag=0 的
+                # 3. 加载文本
                 text_path = pjoin(self.text_dir, name + '.txt')
                 if not os.path.exists(text_path):
                     continue
@@ -96,30 +90,21 @@ class Motion2TextDatasetTokenCustom(data.Dataset):
                     for line in f.readlines():
                         line_split = line.strip().split('#')
                         caption = line_split[0]
-                        if len(line_split) < 4: 
-                            continue
+                        if len(line_split) < 2: continue
                         tokens_text = line_split[1].split(' ')
-                        f_tag = float(line_split[2])
-                        to_tag = float(line_split[3])
-                        f_tag = 0.0 if np.isnan(f_tag) else f_tag
-                        to_tag = 0.0 if np.isnan(to_tag) else to_tag
                         
-                        # 只保留完整 motion 的文本标注
-                        if f_tag == 0.0 and to_tag == 0.0:
-                            text_dict = {
-                                'caption': caption,
-                                'tokens': tokens_text
-                            }
-                            text_data.append(text_dict)
+                        text_dict = {
+                            'caption': caption,
+                            'tokens': tokens_text
+                        }
+                        text_data.append(text_dict)
 
                 if len(text_data) > 0:
                     data_dict[name] = {
-                        'tokens': tokens,
                         'token_path': token_file,
                         'text': text_data
                     }
                     new_name_list.append(name)
-                        
             except Exception as e:
                 pass
 
@@ -134,8 +119,8 @@ class Motion2TextDatasetTokenCustom(data.Dataset):
         fname = self.name_list[item]
         data = self.data_dict[fname]
         
-        # 1. 加载 Motion Tokens (已经在 __init__ 中裁剪好了)
-        m_tokens = data['tokens']
+        # 1. 加载 Motion Tokens
+        m_tokens = np.load(data['token_path'])
         if len(m_tokens.shape) > 1:
             m_tokens = m_tokens.flatten()
         
@@ -188,6 +173,10 @@ class Motion2TextDatasetTokenCustom(data.Dataset):
         motion_file = pjoin(self.motion_dir, fname + '.npy')
         if os.path.exists(motion_file):
             motion = np.load(motion_file)
+            
+            # 对于 M2T 任务，motion 应该和 token 对应
+            # Token 是从完整 motion 编码的，所以这里不做 random crop
+            # 只做长度对齐和归一化
             m_length = motion.shape[0]
             
             # 对齐到 unit_length 的倍数
