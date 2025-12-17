@@ -379,6 +379,19 @@ class MLM(nn.Module):
                 do_sample=False,
                 # bad_words_ids=self.bad_words_ids
             )
+            
+            # Clean up the prompt prefix from generated text (for test/eval stage)
+            if stage == 'test':
+                cleaned_text_final = []
+                for text in cleaned_text:
+                    # Remove "Generate text: <Motion_Placeholder>" prefix and variants
+                    text = text.replace('Generate text: <Motion_Placeholder>', '').strip()
+                    text = text.replace('Generate text with', '').strip()
+                    # Remove any leading " \n " that might remain
+                    text = text.lstrip(' \n')
+                    cleaned_text_final.append(text)
+                return cleaned_text_final
+            
             return cleaned_text
 
     def motion_token_to_string(self, motion_token: Tensor, lengths: List[int]):

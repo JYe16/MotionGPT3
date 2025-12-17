@@ -6,6 +6,7 @@ NUM_NODES: 1
 TEST:
   CHECKPOINTS: 'experiments/motgpt/debug--Custom_M2T_Training/checkpoints/last.ckpt'
   SPLIT: test
+  BATCH_SIZE: 2
 
 TRAIN:
   # 使用我们自定义的 STAGE 名称来触发 Motion2TextDatasetTokenCustom
