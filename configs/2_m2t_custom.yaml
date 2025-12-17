@@ -53,7 +53,7 @@ model:
         ablation: ${ABLATION}
         # 修改这里以匹配你 VQ-VAE 的码本大小 (例如 512 或 1024)
         motion_codebook_size: 512
-        vocab_size: 1024 # MotionGPT 默认词表大小
+        vocab_size: 512 # MotionGPT 默认词表大小
     motion_vae:
       target: motGPT.archs.mld_vae.MldVae
       params:
