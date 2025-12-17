@@ -1,172 +1,212 @@
-import random
+import torch
+from torch.utils import data
 import numpy as np
 import os
 from os.path import join as pjoin
-from .dataset_t2m import Text2MotionDataset
+import random
+import codecs as cs
+from tqdm import tqdm
 
-
-class Motion2TextDatasetTokenCustom(Text2MotionDataset):
-    """
-    Custom dataset for M2T task with pre-tokenized motion.
-    Inherits from Text2MotionDataset to reuse data loading logic.
-    Functionality matches Text2MotionDatasetEvalV3, with custom token path support.
-    """
-
+class Motion2TextDatasetTokenCustom(data.Dataset):
     def __init__(
         self,
         data_root,
         split,
         mean,
         std,
-        w_vectorizer,
         max_motion_length=196,
-        min_motion_length=40,
+        min_motion_length=20,
         unit_length=4,
         fps=20,
         tmpFile=True,
         tiny=False,
         debug=False,
-        code_path="motion_tokens",
+        code_path="motion_tokens", # 默认 token 文件夹名
+        w_vectorizer=None,
         **kwargs,
     ):
-        super().__init__(data_root, split, mean, std, max_motion_length,
-                         min_motion_length, unit_length, fps, tmpFile, tiny,
-                         debug, **kwargs)
-
         self.w_vectorizer = w_vectorizer
+        self.max_motion_length = max_motion_length
+        self.min_motion_length = min_motion_length
+        self.unit_length = unit_length
+        self.mean = mean
+        self.std = std
+        self.split = split
         
-        # Setup motion token directory (custom addition)
-        # code_path can come either as named param or from kwargs
-        if code_path is None:
-            code_path = "motion_tokens"
+        # 路径设置
+        split_file = pjoin(data_root, split + '.txt')
+        self.text_dir = pjoin(data_root, 'texts')
+        self.motion_dir = pjoin(data_root, 'new_joint_vecs')
+        
+        # 处理 Token 路径
+        # 如果配置中传入了 code_path，使用配置的；否则默认 'motion_tokens'
+        actual_code_path = kwargs.get('code_path', code_path)
+        if actual_code_path is None:
+            actual_code_path = "motion_tokens"
             
-        if os.path.isabs(code_path):
-            self.motion_token_dir = code_path
+        if os.path.isabs(actual_code_path):
+            self.motion_token_dir = actual_code_path
         else:
-            self.motion_token_dir = pjoin(data_root, code_path)
+            self.motion_token_dir = pjoin(data_root, actual_code_path)
 
-        print(f"[Motion2TextDatasetTokenCustom] Loading tokens from: {self.motion_token_dir}")
-        
-        # Filter samples that don't have corresponding token files
-        # We need to keep name_list and length_arr in sync, and rebuild sorted order
-        original_count = len(self.name_list)
-        
-        # Build filtered lists while maintaining correspondence
-        filtered_name_list = []
-        filtered_length_list = []
-        for i, name in enumerate(self.name_list):
-            token_file = pjoin(self.motion_token_dir, name + '.npy')
-            if os.path.exists(token_file):
-                filtered_name_list.append(name)
-                filtered_length_list.append(self.length_arr[i])
-        
-        # Sort by length (required for pointer mechanism)
-        if filtered_name_list:
-            sorted_pairs = sorted(zip(filtered_name_list, filtered_length_list), key=lambda x: x[1])
-            self.name_list = [x[0] for x in sorted_pairs]
-            self.length_arr = np.array([x[1] for x in sorted_pairs])
+        print(f"[CustomDataset] Loading tokens from: {self.motion_token_dir}")
+
+        # 加载 Split 文件
+        self.id_list = []
+        if os.path.exists(split_file):
+            with cs.open(split_file, "r") as f:
+                for line in f.readlines():
+                    self.id_list.append(line.strip())
         else:
-            self.name_list = []
-            self.length_arr = np.array([])
+            print(f"[Error] Split file not found: {split_file}")
+
+        # 数据过滤与加载逻辑
+        new_name_list = []
+        data_dict = {}
         
-        # Reset pointer for the new filtered dataset
-        self.pointer = 0  # Reset first
-        if len(self.length_arr) > 0:
-            self.pointer = np.searchsorted(self.length_arr, self.max_length)
-        
-        filtered_count = len(self.name_list)
-        effective_count = len(self.name_list) - self.pointer
-        print(f"[Motion2TextDatasetTokenCustom] Filtered {original_count - filtered_count} samples without token files. Remaining: {filtered_count}")
-        print(f"[Motion2TextDatasetTokenCustom] Effective samples (after pointer): {effective_count}")
+        print(f"Loading {split} dataset...")
+        for name in tqdm(self.id_list):
+            try:
+                # 1. 检查 Token 文件
+                token_file = pjoin(self.motion_token_dir, name + '.npy')
+                if not os.path.exists(token_file):
+                    continue
+                
+                # 2. 检查长度 (快速读取)
+                tokens = np.load(token_file)
+                if len(tokens.shape) > 1:
+                    tokens = tokens.flatten()
+                    
+                if len(tokens) < self.min_motion_length or len(tokens) >= self.max_motion_length:
+                    continue
+
+                # 3. 加载文本
+                text_path = pjoin(self.text_dir, name + '.txt')
+                if not os.path.exists(text_path):
+                    continue
+                    
+                text_data = []
+                with cs.open(text_path) as f:
+                    for line in f.readlines():
+                        line_split = line.strip().split('#')
+                        caption = line_split[0]
+                        if len(line_split) < 2: continue
+                        tokens_text = line_split[1].split(' ')
+                        
+                        text_dict = {
+                            'caption': caption,
+                            'tokens': tokens_text
+                        }
+                        text_data.append(text_dict)
+
+                if len(text_data) > 0:
+                    data_dict[name] = {
+                        'token_path': token_file,
+                        'text': text_data
+                    }
+                    new_name_list.append(name)
+            except Exception as e:
+                pass
+
+        self.data_dict = data_dict
+        self.name_list = new_name_list
+        print(f"[CustomDataset] Loaded {len(self.name_list)} samples for {split}")
+
+    def __len__(self):
+        return len(self.name_list)
 
     def __getitem__(self, item):
-        # Get text data (same as Text2MotionDatasetEvalV3)
-        idx = self.pointer + item
-        fname = self.name_list[idx]
+        fname = self.name_list[item]
         data = self.data_dict[fname]
-        motion, m_length, text_list = data["motion"], data["length"], data["text"]
-
-        # Get all captions (same as EvalV3)
-        all_captions = [
-            text_dic['caption']
-            for text_dic in text_list
-        ]
-
-        if len(all_captions) > 3:
-            all_captions = all_captions[:3]
-        elif len(all_captions) == 2:
-            all_captions = all_captions + all_captions[0:1]
-        elif len(all_captions) == 1:
-            all_captions = all_captions * 3
-
-        # Randomly select a caption
-        text_data = random.choice(text_list)
-        caption, tokens = text_data["caption"], text_data["tokens"]
         
-        # Text processing (same as EvalV3)
-        max_text_len = 20
-        if len(tokens) < max_text_len:
-            # pad with "unk"
-            tokens = ["sos/OTHER"] + tokens + ["eos/OTHER"]
-            sent_len = len(tokens)
-            tokens = tokens + ["unk/OTHER"] * (max_text_len + 2 - sent_len)
-        else:
-            # crop
-            tokens = tokens[:max_text_len]
-            tokens = ["sos/OTHER"] + tokens + ["eos/OTHER"]
-            sent_len = len(tokens)
-            
-        pos_one_hots = []
-        word_embeddings = []
-        for token in tokens:
-            word_emb, pos_oh = self.w_vectorizer[token]
-            pos_one_hots.append(pos_oh[None, :])
-            word_embeddings.append(word_emb[None, :])
-        pos_one_hots = np.concatenate(pos_one_hots, axis=0)
-        word_embeddings = np.concatenate(word_embeddings, axis=0)
-        
-        # Random crop (same as EvalV3)
-        m_length = motion.shape[0]
-        coin = np.random.choice([False, False, True])
-        if coin:
-            m_length = (m_length // self.unit_length - 1) * self.unit_length
-        else:
-            m_length = (m_length // self.unit_length) * self.unit_length
-        
-        idx = random.randint(0, len(motion) - m_length)
-        motion = motion[idx:idx + m_length]
-
-        # Z Normalization
-        motion = (motion - self.mean) / self.std
-
-        # Load motion tokens (custom addition for M2T task)
-        # Token file is guaranteed to exist (filtered in __init__)
-        token_file = pjoin(self.motion_token_dir, fname + '.npy')
-        m_tokens = np.load(token_file)
+        # 1. 加载 Motion Tokens
+        m_tokens = np.load(data['token_path'])
         if len(m_tokens.shape) > 1:
             m_tokens = m_tokens.flatten()
-        m_tokens_len = len(m_tokens)
+        
+        # 截断处理
+        m_length = len(m_tokens)
+        if m_length > self.max_motion_length:
+            m_tokens = m_tokens[:self.max_motion_length]
+            m_length = self.max_motion_length
 
-        # Create M2T task definition
+        # 2. 加载 Motion (用于评估)
+        motion_file = pjoin(self.motion_dir, fname + '.npy')
+        if os.path.exists(motion_file):
+            motion = np.load(motion_file)
+            motion = (motion - self.mean) / self.std
+            motion_len = len(motion)
+            # 简单截断以匹配 token (假设大致对应，或者评估时只用前一段)
+            # 注意：这里没有严格对齐 token 和 motion 的裁剪，因为 token 可能是 VQ 后的
+            # 但对于 R-Precision，只要是同一个动作即可
+            if motion_len > self.max_motion_length:
+                motion = motion[:self.max_motion_length]
+                motion_len = self.max_motion_length
+        else:
+            # Fallback
+            motion = np.zeros((m_length * 4, 263))
+            motion_len = m_length * 4
+            
+        # 3. 加载 Text
+        text_list = data['text']
+        
+        # 训练时随机选择一条文本，测试时通常也随机，或者在评估代码中处理多条
+        text_data = random.choice(text_list)
+        caption = text_data['caption']
+        tokens = text_data['tokens']
+
+        # Process text if w_vectorizer is available
+        word_embeddings = None
+        pos_one_hots = None
+        sent_len = None
+        
+        if self.w_vectorizer is not None:
+            max_text_len = 20
+            if len(tokens) < max_text_len:
+                tokens_padded = ["sos/OTHER"] + tokens + ["eos/OTHER"]
+                sent_len = len(tokens_padded)
+                tokens_padded = tokens_padded + ["unk/OTHER"] * (max_text_len + 2 - sent_len)
+            else:
+                tokens_padded = tokens[:max_text_len]
+                tokens_padded = ["sos/OTHER"] + tokens_padded + ["eos/OTHER"]
+                sent_len = len(tokens_padded)
+            
+            pos_one_hots_list = []
+            word_embeddings_list = []
+            for token in tokens_padded:
+                word_emb, pos_oh = self.w_vectorizer[token]
+                pos_one_hots_list.append(pos_oh[None, :])
+                word_embeddings_list.append(word_emb[None, :])
+            pos_one_hots = np.concatenate(pos_one_hots_list, axis=0)
+            word_embeddings = np.concatenate(word_embeddings_list, axis=0)
+        
+        # 获取所有 caption (用于评估)
+        all_captions = [x['caption'] for x in text_list]
+
+        # 3. 构造返回值 (适配 MotionGPT3 collate_fn)
+        # 即使是 M2T 任务，collate_fn 可能仍期望 motion tensor 的存在
+        
+        # 定义任务
         task = {
-            'class': 'm2t',
-            'input': ['<Motion_Placeholder>'],
-            'output': [caption]
+            "class": "m2t",
+            "input": ["Generate text: <Motion_Placeholder>"],
+            "output": ["<Caption_Placeholder>"]
         }
 
-        # Return format matches EvalV3:
-        # text, m_tokens, m_tokens_len, motion, length, word_embs, pos_ohot, text_len, tokens, all_captions, tasks, fname
+        # 返回元组顺序参考 dataset_t2m.py:
+        # caption, m_tokens, m_tokens_len, motion, m_length, word_embs, pos_ohot, text_len, tokens, all_captions, tasks, fname
+        
         return (
-            caption,            # text
-            m_tokens,           # m_tokens (for M2T input)
-            m_tokens_len,       # m_tokens_len
-            motion,             # motion
-            m_length,           # length
-            word_embeddings,    # word_embs
-            pos_one_hots,       # pos_ohot
-            sent_len,           # text_len
-            "_".join(tokens),   # tokens (string, same as EvalV3)
-            all_captions,       # all_captions
-            task,               # tasks (M2T task definition)
-            fname               # fname
+            caption,        # caption
+            m_tokens,       # m_tokens (INPUT)
+            m_length,       # m_tokens_len
+            motion,         # motion (Real Motion)
+            motion_len,     # length (Frame Length)
+            word_embeddings,# word_embs
+            pos_one_hots,   # pos_ohot
+            sent_len,       # text_len
+            None,           # tokens
+            all_captions,   # all_captions
+            task,           # tasks
+            fname           # fname
         )

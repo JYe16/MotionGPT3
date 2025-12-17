@@ -1,5 +1,4 @@
 NAME: Custom_M2T_Training
-DEBUG: False  # Disable debug mode to load full dataset
 ACCELERATOR: 'gpu'
 DEVICE: [0]
 NUM_NODES: 1
@@ -12,7 +11,7 @@ TRAIN:
   # 使用包含 'lm' 的 STAGE 名称来触发 VAE 冻结逻辑
   STAGE: lm_token_custom
   instruction_type: m2t
-  BATCH_SIZE: 24
+  BATCH_SIZE: 20
   END_EPOCH: 100
   LR_SCHEDULER:
     target: CosineAnnealingLR
@@ -33,7 +32,7 @@ DATASET:
   # CODE_PATH: motion_tokens_ser0.4 # User's original path
   CODE_PATH: motion_tokens_st_share # Using available path for verification
   HUMANML3D:
-    ROOT: ../llm-sensing/data/humanml3d_263/ # Fixed: was ../../, should be ../
+    ROOT: ../../llm-sensing/data/humanml3d_263/ # User's original path
     # ROOT: datasets/humanml3d/ # Using workspace path
     FPS: 20
     MIN_MOTION_LEN: 20
@@ -66,7 +65,6 @@ model:
         
 LOSS:
   LAMBDA_CLS: 1.0
-  LAMBDA_ORTHO: 0  # Orthogonality loss weight for motion token embeddings
 
 METRIC:
   TYPE: ['M2TMetrics']
