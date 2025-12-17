@@ -362,10 +362,8 @@ class M2TMetrics(Metric):
 
     def get_motion_embeddings(self, feats: Tensor, lengths: List[int]):
         m_lens = torch.tensor(lengths)
-        # 只除一次 UNIT_LEN，原代码除了两次是 bug
-        m_lens = torch.div(m_lens,
-                           self.cfg.DATASET.HUMANML3D.UNIT_LEN,
-                           rounding_mode="floor")
+        # Only divide by UNIT_LEN once (matches original T2M-GPT evaluator)
+        m_lens = m_lens // self.cfg.DATASET.HUMANML3D.UNIT_LEN
         if self.dataname == 'tomato':
             mov = self.t2m_moveencoder(feats[...,4:]).detach()
         elif self.dataname == 'motionx':
