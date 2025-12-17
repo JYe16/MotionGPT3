@@ -63,10 +63,22 @@ class BaseModel(LightningModule):
         dico.update(self.loss_log_dict('train'))
         dico.update(self.loss_log_dict('val'))
         # Log metrics
-        dico.update(self.metrics_log_dict())
+        metrics_dict = self.metrics_log_dict()
+        dico.update(metrics_dict)
         # Write to log only if not sanity check
         if not self.trainer.sanity_checking:
             self.log_dict(dico, sync_dist=True, rank_zero_only=True)
+            # Print M2T metrics to console/log
+            if self.global_rank == 0 and metrics_dict:
+                print(f"\n{'='*60}")
+                print(f"Epoch {self.current_epoch} - Validation Metrics:")
+                print(f"{'='*60}")
+                for key, value in sorted(metrics_dict.items()):
+                    if isinstance(value, float):
+                        print(f"  {key}: {value:.6f}")
+                    else:
+                        print(f"  {key}: {value}")
+                print(f"{'='*60}\n")
 
     def on_test_epoch_end(self):
         # Log metrics
