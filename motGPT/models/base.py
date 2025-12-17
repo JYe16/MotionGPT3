@@ -8,7 +8,7 @@ from os.path import join as pjoin
 from collections import OrderedDict
 from motGPT.metrics import BaseMetrics
 from motGPT.config import get_obj_from_str
-import gc
+import csv
 
 class BaseModel(LightningModule):
     def __init__(self, *args, **kwargs):
@@ -87,9 +87,49 @@ class BaseModel(LightningModule):
         if not self.trainer.sanity_checking:
             self.log_dict(dico, sync_dist=True, rank_zero_only=True)
         self.save_npy(self.test_step_outputs)
+        
+        # Save M2T predictions to CSV
+        if self.hparams.task == "m2t" and self.global_rank == 0 and len(self.test_step_outputs) > 0:
+            self.save_m2t_csv(self.test_step_outputs)
+        
         self.rep_i = self.rep_i + 1
         # Free up the memory
         self.test_step_outputs.clear()
+
+    def save_m2t_csv(self, outputs):
+        """Save M2T predictions and ground truths to CSV file"""
+        cfg = self.hparams.cfg
+        output_dir = Path(
+            os.path.join(
+                cfg.FOLDER,
+                str(cfg.model.target.split('.')[-2].lower()),
+                str(cfg.NAME),
+            ))
+        os.makedirs(output_dir, exist_ok=True)
+        
+        csv_file = output_dir / f"predictions_m2t_rep{self.rep_i}_{cfg.TIME}.csv"
+        
+        with open(csv_file, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["filename", "predicted_text", "ground_truth_1", "ground_truth_2", "ground_truth_3"])
+            
+            for batch_output in outputs:
+                # batch_output for m2t: (t_pred, length, m_ref, t_ref, fname)
+                t_pred = batch_output[0]  # predicted texts
+                t_ref = batch_output[3]   # ground truth texts (all_captions)
+                fnames = batch_output[4]  # filenames
+                
+                for idx in range(len(t_pred)):
+                    pred_text = t_pred[idx] if t_pred[idx] else ""
+                    gt_texts = list(t_ref[idx]) if t_ref[idx] else ["", "", ""]
+                    # Ensure we have 3 ground truth texts
+                    while len(gt_texts) < 3:
+                        gt_texts.append("")
+                    fname = fnames[idx].split('/')[-1] if fnames[idx] else ""
+                    
+                    writer.writerow([fname, pred_text, gt_texts[0], gt_texts[1], gt_texts[2]])
+        
+        print(f"M2T predictions saved to {str(csv_file)}")
 
     def preprocess_state_dict(self, state_dict):
         new_state_dict = OrderedDict()

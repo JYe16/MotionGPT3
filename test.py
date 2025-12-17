@@ -3,7 +3,6 @@ import os
 import numpy as np
 import pytorch_lightning as pl
 import torch
-import csv
 from pathlib import Path
 from rich import get_console
 from rich.table import Table
@@ -106,32 +105,6 @@ def main():
         metrics_type = ", ".join(cfg.METRIC.TYPE)
         logger.info(f"Evaluating {metrics_type} - Replication {i}")
         metrics = trainer.test(model, datamodule=datamodule)[0]
-        
-        # Save predictions to CSV for M2T task
-        if cfg.model.params.task == "m2t" and i == 0:  # Only save once (first replication)
-            csv_file = output_dir.parent / f"predictions_m2t_{cfg.TIME}.csv"
-            with open(csv_file, "w", newline="", encoding="utf-8") as f:
-                writer = csv.writer(f)
-                writer.writerow(["filename", "predicted_text", "ground_truth_1", "ground_truth_2", "ground_truth_3"])
-                
-                test_outputs = model.test_step_outputs
-                for batch_output in test_outputs:
-                    # batch_output: (t_pred, length, m_ref, t_ref, fname)
-                    t_pred = batch_output[0]  # predicted texts
-                    t_ref = batch_output[3]   # ground truth texts (all_captions)
-                    fnames = batch_output[4]  # filenames
-                    
-                    for idx in range(len(t_pred)):
-                        pred_text = t_pred[idx] if t_pred[idx] else ""
-                        gt_texts = t_ref[idx] if t_ref[idx] else ["", "", ""]
-                        # Ensure we have 3 ground truth texts
-                        while len(gt_texts) < 3:
-                            gt_texts.append("")
-                        fname = fnames[idx].split('/')[-1] if fnames[idx] else ""
-                        
-                        writer.writerow([fname, pred_text, gt_texts[0], gt_texts[1], gt_texts[2]])
-            
-            logger.info(f"Predictions saved to {str(csv_file)}")
         
         if "TM2TMetrics" in metrics_type and cfg.model.params.task == "t2m" and cfg.model.params.stage != 'vae':
             # mm meteics
