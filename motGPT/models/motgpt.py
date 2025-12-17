@@ -20,6 +20,48 @@ def sig(x):
     return s
 
 
+def compute_motion_orthogonality_loss(embedding_weight: torch.Tensor,
+                                       motion_token_start: int,
+                                       motion_token_end: int,
+                                       device: torch.device) -> torch.Tensor:
+    """
+    Encourage motion token embeddings to be mutually orthogonal.
+    This serves as a regularization to help motion tokens learn more
+    distinctive representations.
+
+    Args:
+        embedding_weight: (vocab_size, hidden_dim), model's embedding matrix.
+        motion_token_start: Start index of motion tokens in vocabulary.
+        motion_token_end: End index (exclusive) of motion tokens in vocabulary.
+        device: torch device.
+
+    Returns:
+        A scalar tensor representing the orthogonality regularization loss.
+    """
+    # Extract motion token embeddings
+    motion_embs = embedding_weight[motion_token_start:motion_token_end]  # (N, D)
+    
+    # If less than 2 motion tokens, orthogonality is not meaningful.
+    if motion_embs.size(0) < 2:
+        return torch.zeros((), device=device, dtype=embedding_weight.dtype)
+
+    # Normalize each embedding to unit length.
+    motion_embs = F.normalize(motion_embs, p=2, dim=-1)  # (N, D)
+
+    # Gram matrix of cosine similarities: G_ij = cos(e_i, e_j)
+    gram = motion_embs @ motion_embs.t()  # (N, N)
+
+    # We want gram ≈ I: diagonal ~ 1, off-diagonal ~ 0
+    eye = torch.eye(gram.size(0), device=device, dtype=gram.dtype)
+    diff = gram - eye  # diagonal goes to 0, off-diagonal is cos(e_i, e_j)
+
+    # Normalize by N*(N-1) to make it scale invariant w.r.t. number of motion tokens.
+    n = gram.size(0)
+    loss = diff.pow(2).sum() / (n * (n - 1))
+
+    return loss
+
+
 class MotGPT(BaseModel):
     """
     Stage 1 Motion Tokenizer
@@ -77,6 +119,12 @@ class MotGPT(BaseModel):
             self.vae.training = False
             for p in self.vae.parameters():
                 p.requires_grad = False
+            
+            # Store motion token indices for orthogonality loss computation
+            # GPT2 original vocab size is 50257, motion tokens are added after
+            self._motion_token_start_idx = 50257  # GPT2 original vocab size
+            num_motion_tokens = self.lm.m_codebook_size + 3  # motion tokens + special tokens
+            self._motion_token_end_idx = self._motion_token_start_idx + num_motion_tokens
         self.model_dir = cfg.FOLDER_EXP
         self.vis_num = 2
 
@@ -438,6 +486,24 @@ class MotGPT(BaseModel):
             rs_set = self.train_lm_forward(batch)
             # rs_set['diff_loss'] = self.forward_diff_loss(batch["motion"], rs_set['hidden'])
             loss = self._losses['losses_' + split].update(rs_set)
+            
+            # Add orthogonality loss for motion token embeddings (no freezing, just regularization)
+            if 'lm' in self.hparams.stage and hasattr(self, '_motion_token_start_idx'):
+                ortho_weight = getattr(self.hparams.cfg.LOSS, 'LAMBDA_ORTHO', 0.0)
+                if ortho_weight > 0:
+                    embedding_weight = self.lm.language_model.transformer.wte.weight
+                    ortho_loss = compute_motion_orthogonality_loss(
+                        embedding_weight,
+                        self._motion_token_start_idx,
+                        self._motion_token_end_idx,
+                        self.device
+                    )
+                    loss = loss + ortho_weight * ortho_loss
+                    
+                    # Log orthogonality loss
+                    self.log('train/ortho_loss', ortho_loss.detach(), 
+                            on_step=True, on_epoch=True, prog_bar=True, 
+                            sync_dist=True, rank_zero_only=True)
         elif self.hparams.stage == 'lm_rl' and split in ['train']:
             rs_set = self.train_rl_forward(batch)
             loss = None
