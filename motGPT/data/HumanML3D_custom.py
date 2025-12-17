@@ -1,5 +1,6 @@
 from .HumanML3D import HumanML3DDataModule
 from .humanml.dataset_m2t_token_custom import Motion2TextDatasetTokenCustom
+from .humanml.dataset_t2m_eval_v3 import Text2MotionDatasetEvalV3
 
 class HumanML3DDataModuleCustom(HumanML3DDataModule):
     def __init__(self, cfg, **kwargs):
@@ -12,6 +13,9 @@ class HumanML3DDataModuleCustom(HumanML3DDataModule):
             print("[DataModule] Using Custom Token Dataset for M2T Training")
             self.Dataset = Motion2TextDatasetTokenCustom
             self.DatasetEval = Motion2TextDatasetTokenCustom
+
+            # self.Dataset = Text2MotionDatasetEvalV3
+            # self.DatasetEval = Text2MotionDatasetEvalV3
             
             # 确保一些参数正确传递
             self.hparams.code_path = cfg.DATASET.CODE_PATH
