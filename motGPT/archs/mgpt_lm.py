@@ -380,10 +380,6 @@ class MLM(nn.Module):
                 # bad_words_ids=self.bad_words_ids
             )
             
-            # Debug: print first few raw outputs to understand the format
-            if stage in ['test', 'val'] and len(cleaned_text) > 0:
-                print(f"\n[DEBUG M2T] Raw output sample: {repr(cleaned_text[0][:200] if len(cleaned_text[0]) > 200 else cleaned_text[0])}")
-            
             # Clean up the prompt prefix from generated text (for test/eval/val stage)
             if stage in ['test', 'val']:
                 cleaned_text_final = []
