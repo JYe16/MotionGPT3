@@ -380,8 +380,8 @@ class MLM(nn.Module):
                 # bad_words_ids=self.bad_words_ids
             )
             
-            # Clean up the prompt prefix from generated text (for test/eval stage)
-            if stage == 'test':
+            # Clean up the prompt prefix from generated text (for test/eval/val stage)
+            if stage in ['test', 'val']:
                 cleaned_text_final = []
                 for text in cleaned_text:
                     # Remove "Generate text: <Motion_Placeholder>" prefix and variants
