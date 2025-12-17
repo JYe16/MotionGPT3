@@ -125,88 +125,83 @@ class Motion2TextDatasetTokenCustom(data.Dataset):
             m_tokens = m_tokens.flatten()
         
         # 截断处理
-        m_length = len(m_tokens)
-        if m_length > self.max_motion_length:
+        m_tokens_len = len(m_tokens)
+        if m_tokens_len > self.max_motion_length:
             m_tokens = m_tokens[:self.max_motion_length]
-            m_length = self.max_motion_length
+            m_tokens_len = self.max_motion_length
 
-        # 2. 加载 Motion (用于评估)
-        motion_file = pjoin(self.motion_dir, fname + '.npy')
-        if os.path.exists(motion_file):
-            motion = np.load(motion_file)
-            motion = (motion - self.mean) / self.std
-            motion_len = len(motion)
-            # 简单截断以匹配 token (假设大致对应，或者评估时只用前一段)
-            # 注意：这里没有严格对齐 token 和 motion 的裁剪，因为 token 可能是 VQ 后的
-            # 但对于 R-Precision，只要是同一个动作即可
-            if motion_len > self.max_motion_length:
-                motion = motion[:self.max_motion_length]
-                motion_len = self.max_motion_length
-        else:
-            # Fallback
-            motion = np.zeros((m_length * 4, 263))
-            motion_len = m_length * 4
-            
-        # 3. 加载 Text
+        # 2. 加载 Text
         text_list = data['text']
         
-        # 训练时随机选择一条文本，测试时通常也随机，或者在评估代码中处理多条
+        # 获取所有 caption (用于评估) - 与 eval_v3 相同的处理逻辑
+        all_captions = [text_dic['caption'] for text_dic in text_list]
+
+        if len(all_captions) > 3:
+            all_captions = all_captions[:3]
+        elif len(all_captions) == 2:
+            all_captions = all_captions + all_captions[0:1]
+        elif len(all_captions) == 1:
+            all_captions = all_captions * 3
+
+        # 随机选择一条文本
         text_data = random.choice(text_list)
         caption = text_data['caption']
         tokens = text_data['tokens']
-
-        # Process text if w_vectorizer is available
-        word_embeddings = None
-        pos_one_hots = None
-        sent_len = None
         
-        if self.w_vectorizer is not None:
-            max_text_len = 20
-            if len(tokens) < max_text_len:
-                tokens_padded = ["sos/OTHER"] + tokens + ["eos/OTHER"]
-                sent_len = len(tokens_padded)
-                tokens_padded = tokens_padded + ["unk/OTHER"] * (max_text_len + 2 - sent_len)
-            else:
-                tokens_padded = tokens[:max_text_len]
-                tokens_padded = ["sos/OTHER"] + tokens_padded + ["eos/OTHER"]
-                sent_len = len(tokens_padded)
+        # Text processing - 与 eval_v3 完全相同
+        max_text_len = 20
+        if len(tokens) < max_text_len:
+            # pad with "unk"
+            tokens = ["sos/OTHER"] + tokens + ["eos/OTHER"]
+            sent_len = len(tokens)
+            tokens = tokens + ["unk/OTHER"] * (max_text_len + 2 - sent_len)
+        else:
+            # crop
+            tokens = tokens[:max_text_len]
+            tokens = ["sos/OTHER"] + tokens + ["eos/OTHER"]
+            sent_len = len(tokens)
+        pos_one_hots = []
+        word_embeddings = []
+        for token in tokens:
+            word_emb, pos_oh = self.w_vectorizer[token]
+            pos_one_hots.append(pos_oh[None, :])
+            word_embeddings.append(word_emb[None, :])
+        pos_one_hots = np.concatenate(pos_one_hots, axis=0)
+        word_embeddings = np.concatenate(word_embeddings, axis=0)
+
+        # 3. 加载 Motion (用于评估) - 与 eval_v3 相同的处理逻辑
+        motion_file = pjoin(self.motion_dir, fname + '.npy')
+        if os.path.exists(motion_file):
+            motion = np.load(motion_file)
             
-            pos_one_hots_list = []
-            word_embeddings_list = []
-            for token in tokens_padded:
-                word_emb, pos_oh = self.w_vectorizer[token]
-                pos_one_hots_list.append(pos_oh[None, :])
-                word_embeddings_list.append(word_emb[None, :])
-            pos_one_hots = np.concatenate(pos_one_hots_list, axis=0)
-            word_embeddings = np.concatenate(word_embeddings_list, axis=0)
-        
-        # 获取所有 caption (用于评估)
-        all_captions = [x['caption'] for x in text_list]
+            # Random crop - 与 eval_v3 完全相同
+            m_length = motion.shape[0]
+            coin = np.random.choice([False, False, True])
+            if coin:
+                m_length = (m_length // self.unit_length - 1) * self.unit_length
+            else:
+                m_length = (m_length // self.unit_length) * self.unit_length
+            
+            idx = random.randint(0, len(motion) - m_length)
+            motion = motion[idx:idx + m_length]
 
-        # 3. 构造返回值 (适配 MotionGPT3 collate_fn)
-        # 即使是 M2T 任务，collate_fn 可能仍期望 motion tensor 的存在
+            # Z Normalization
+            motion = (motion - self.mean) / self.std
+        else:
+            # Fallback
+            motion = np.zeros((m_tokens_len * 4, 263))
+            m_length = m_tokens_len * 4
+
+        # 返回元组顺序与 eval_v3 完全相同:
+        # caption, m_tokens, m_tokens_len, motion, m_length, word_embs, pos_ohot, text_len, tokens, all_captions, tasks, fname
+        # 注意: 这里返回 m_tokens 和 m_tokens_len 供 M2T 任务使用
         
-        # 定义任务
+        # M2T 任务定义
         task = {
             "class": "m2t",
             "input": ["Generate text: <Motion_Placeholder>"],
             "output": ["<Caption_Placeholder>"]
         }
-
-        # 返回元组顺序参考 dataset_t2m.py:
-        # caption, m_tokens, m_tokens_len, motion, m_length, word_embs, pos_ohot, text_len, tokens, all_captions, tasks, fname
         
-        return (
-            caption,        # caption
-            m_tokens,       # m_tokens (INPUT)
-            m_length,       # m_tokens_len
-            motion,         # motion (Real Motion)
-            motion_len,     # length (Frame Length)
-            word_embeddings,# word_embs
-            pos_one_hots,   # pos_ohot
-            sent_len,       # text_len
-            None,           # tokens
-            all_captions,   # all_captions
-            task,           # tasks
-            fname           # fname
-        )
+        return caption, m_tokens, m_tokens_len, motion, m_length, word_embeddings, pos_one_hots, sent_len, "_".join(
+            tokens), all_captions, task, fname
