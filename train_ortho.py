@@ -30,6 +30,13 @@ from motGPT.models.build_model import build_model
 from motGPT.utils.logger import create_logger
 from motGPT.utils.load_checkpoint import load_pretrained, load_pretrained_vae
 
+# PEFT LoRA imports
+try:
+    from peft import LoraConfig, get_peft_model, TaskType
+    PEFT_AVAILABLE = True
+except ImportError:
+    PEFT_AVAILABLE = False
+
 
 def load_vqvae_codebook(codebook_path: str, logger=None) -> torch.Tensor:
     """
@@ -195,6 +202,159 @@ def initialize_motion_token_embeddings(model, codebook_weight: torch.Tensor,
         logger.info(f"=" * 60)
 
 
+def apply_lora_to_gpt2(model, lora_config: dict, original_vocab_size: int = 50257, logger=None):
+    """
+    Apply LoRA (Low-Rank Adaptation) to the GPT2 model inside MotGPT.
+    
+    This significantly reduces the number of trainable parameters while
+    maintaining model performance. Importantly, this also ensures the 
+    motion token embeddings remain trainable.
+    
+    Args:
+        model: The MotGPTOrtho model containing self.lm.language_model (GPT2)
+        lora_config: Dictionary with LoRA hyperparameters:
+            - r: LoRA rank (default: 8)
+            - lora_alpha: LoRA alpha scaling (default: 16)
+            - lora_dropout: Dropout probability (default: 0.05)
+            - target_modules: Which modules to apply LoRA to
+            - train_embeddings: 'all' (full embedding), 'motion_only' (only motion tokens), or False
+        original_vocab_size: GPT2 original vocab size (50257), used to identify motion tokens
+        logger: Optional logger
+    """
+    if not PEFT_AVAILABLE:
+        if logger:
+            logger.warning("PEFT not installed. Run: pip install peft")
+            logger.warning("Continuing without LoRA...")
+        return model
+    
+    # Get LoRA hyperparameters with defaults
+    r = lora_config.get('r', 8)
+    lora_alpha = lora_config.get('lora_alpha', 16)
+    lora_dropout = lora_config.get('lora_dropout', 0.05)
+    target_modules = lora_config.get('target_modules', ['c_attn', 'c_proj'])
+    train_embeddings = lora_config.get('train_embeddings', 'motion_only')  # 'all', 'motion_only', or False
+    
+    if logger:
+        logger.info(f"=" * 60)
+        logger.info(f"Applying LoRA to GPT2")
+        logger.info(f"  r (rank): {r}")
+        logger.info(f"  lora_alpha: {lora_alpha}")
+        logger.info(f"  lora_dropout: {lora_dropout}")
+        logger.info(f"  target_modules: {target_modules}")
+        logger.info(f"  train_embeddings: {train_embeddings}")
+    
+    # Count parameters before LoRA
+    gpt2 = model.lm.language_model
+    total_params_before = sum(p.numel() for p in gpt2.parameters())
+    trainable_params_before = sum(p.numel() for p in gpt2.parameters() if p.requires_grad)
+    
+    # Create LoRA config
+    # Determine modules_to_save based on train_embeddings setting
+    modules_to_save = None
+    if train_embeddings == 'all':
+        # Train entire embedding layer
+        modules_to_save = ['wte', 'lm_head']
+    # For 'motion_only' or False, we don't use modules_to_save
+    # We'll handle motion-only training separately after LoRA is applied
+    
+    peft_config = LoraConfig(
+        task_type=TaskType.CAUSAL_LM,
+        inference_mode=False,
+        r=r,
+        lora_alpha=lora_alpha,
+        lora_dropout=lora_dropout,
+        target_modules=target_modules,
+        modules_to_save=modules_to_save,
+        bias="none",
+    )
+    
+    # Apply LoRA to GPT2
+    model.lm.language_model = get_peft_model(gpt2, peft_config)
+    
+    # If train_embeddings == 'motion_only', manually enable gradients for motion tokens only
+    if train_embeddings == 'motion_only':
+        if logger:
+            logger.info(f"  Enabling gradients only for motion token embeddings (indices {original_vocab_size}+)")
+        
+        # Get the embedding layer - need to navigate through PEFT wrapper
+        peft_model = model.lm.language_model
+        base_model = peft_model.base_model.model  # Get underlying GPT2
+        
+        # Enable gradients for embedding layer but we'll use a hook to mask gradients
+        wte = base_model.transformer.wte
+        lm_head = base_model.lm_head
+        
+        # Make embedding layer require grad
+        wte.weight.requires_grad = True
+        if lm_head.weight is not wte.weight:  # If not tied
+            lm_head.weight.requires_grad = True
+        
+        # Register hook to zero out gradients for non-motion tokens
+        def create_embedding_grad_hook(vocab_size):
+            def hook(grad):
+                # Zero out gradients for original vocab tokens
+                mask = torch.ones_like(grad)
+                mask[:vocab_size] = 0
+                return grad * mask
+            return hook
+        
+        wte.weight.register_hook(create_embedding_grad_hook(original_vocab_size))
+        if lm_head.weight is not wte.weight:
+            lm_head.weight.register_hook(create_embedding_grad_hook(original_vocab_size))
+        
+        num_motion_tokens = wte.weight.shape[0] - original_vocab_size
+        hidden_dim = wte.weight.shape[1]
+        motion_params = num_motion_tokens * hidden_dim  # motion_tokens * hidden_dim
+        if logger:
+            logger.info(f"  Motion token embeddings: {num_motion_tokens} tokens × {hidden_dim} dim = {motion_params:,} params")
+    
+    # Count parameters after LoRA
+    trainable_params_after = sum(
+        p.numel() for p in model.lm.language_model.parameters() if p.requires_grad
+    )
+    
+    # Count LoRA params specifically
+    lora_params = sum(
+        p.numel() for name, p in model.lm.language_model.named_parameters() 
+        if p.requires_grad and 'lora' in name.lower()
+    )
+    
+    if logger:
+        logger.info(f"  Total parameters: {total_params_before:,}")
+        logger.info(f"  Trainable before LoRA: {trainable_params_before:,}")
+        logger.info(f"  Trainable after LoRA (technical): {trainable_params_after:,}")
+        logger.info(f"  LoRA adapter params: {lora_params:,}")
+        
+        if train_embeddings == 'motion_only':
+            # Calculate effective trainable params
+            peft_model = model.lm.language_model
+            base_model = peft_model.base_model.model
+            total_vocab = base_model.transformer.wte.weight.shape[0]
+            hidden_dim = base_model.transformer.wte.weight.shape[1]
+            num_motion = total_vocab - original_vocab_size
+            
+            # Check if wte and lm_head are tied (GPT2 default is tied)
+            wte_tied = base_model.transformer.wte.weight is base_model.lm_head.weight
+            multiplier = 1 if wte_tied else 2
+            
+            motion_emb_params = num_motion * hidden_dim * multiplier
+            effective_trainable = lora_params + motion_emb_params
+            
+            logger.info(f"  Motion embedding params: {motion_emb_params:,} ({num_motion} tokens × {hidden_dim} dim" + 
+                       (f", tied)" if wte_tied else f" × 2)"))
+            logger.info(f"  Effective trainable: {effective_trainable:,}")
+        
+        reduction = (1 - trainable_params_after / trainable_params_before) * 100
+        logger.info(f"  Technical parameter reduction: {reduction:.1f}%")
+        logger.info(f"=" * 60)
+    
+    # Print trainable parameters summary
+    if logger:
+        model.lm.language_model.print_trainable_parameters()
+    
+    return model
+
+
 def main():
     # Configs
     cfg = parse_args(phase="train")  # parse config file
@@ -260,6 +420,19 @@ def main():
     else:
         logger.warning(f"Codebook file not found at: {codebook_path}")
         logger.warning("Using default random initialization for motion token embeddings")
+
+    # =====================================================
+    # NEW: Apply LoRA to GPT2 for parameter-efficient training
+    # =====================================================
+    lora_config = cfg.get('LORA', None)
+    if lora_config and lora_config.get('ENABLED', False):
+        model = apply_lora_to_gpt2(
+            model=model,
+            lora_config=lora_config,
+            logger=logger
+        )
+    else:
+        logger.info("LoRA disabled. Training full GPT2 model.")
 
     # Seed
     pl.seed_everything(cfg.SEED_VALUE)

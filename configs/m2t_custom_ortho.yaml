@@ -2,13 +2,31 @@
 # This config uses MotGPTOrtho model to encourage orthogonal motion token embeddings
 # Key feature: Initialize motion token embeddings from VQ-VAE codebook via sparse projection
 
-NAME: M2T_Ortho_CodebookInit
+NAME: M2T_Ortho_CodebookInit_LoRA
 ACCELERATOR: 'gpu'
 DEVICE: [0]
 NUM_NODES: 1
 
 # Path to VQ-VAE codebook for motion token embedding initialization
 CODEBOOK_PATH: checkpoints/codebook_st_share.pt
+
+# =====================================================
+# LoRA Configuration for Parameter-Efficient Training
+# =====================================================
+LORA:
+  ENABLED: true
+  r: 16                      # LoRA rank (lower = fewer params, typical: 4-16)
+  lora_alpha: 32            # LoRA scaling factor (typical: 2x rank)
+  lora_dropout: 0.05        # Dropout for LoRA layers
+  # train_embeddings options:
+  #   - 'motion_only': Only train motion token embeddings (indices 50257+), most efficient
+  #   - 'all': Train entire embedding layer (wte + lm_head)
+  #   - false: Don't train any embeddings, only LoRA params
+  train_embeddings: 'motion_only'
+  # Target modules for GPT2: c_attn (QKV attention), c_proj (output projection)
+  target_modules:
+    - c_attn
+    - c_proj
 
 TEST:
   CHECKPOINTS: 'checkpoints/last.ckpt'
@@ -18,7 +36,7 @@ TEST:
 TRAIN:
   STAGE: token_custom
   instruction_type: m2t
-  BATCH_SIZE: 256
+  BATCH_SIZE: 24
   END_EPOCH: 100
   LR_SCHEDULER:
     target: CosineAnnealingLR
