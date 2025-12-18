@@ -57,7 +57,7 @@ DATASET:
   HUMANML3D:
     ROOT: ../llm-sensing/data/humanml3d_263/
     FPS: 20
-    MIN_MOTION_LEN: 20    # Standard HumanML3D evaluation: min=40 frames
+    MIN_MOTION_LEN: 40    # Standard HumanML3D evaluation: min=40 frames
     MAX_MOTION_LEN: 200   # Standard HumanML3D evaluation: max<200 frames
 
 model:

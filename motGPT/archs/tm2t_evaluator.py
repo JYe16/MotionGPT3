@@ -56,8 +56,8 @@ class MotionEncoderBiGRUCo(nn.Module):
 
         cap_lens = m_lens.data.tolist()
         
-        # emb = pack_padded_sequence(input=input_embs, lengths=cap_lens, batch_first=True)
-        emb = input_embs
+        # 启用 pack_padded_sequence 以正确处理 padding
+        emb = pack_padded_sequence(input=input_embs, lengths=cap_lens, batch_first=True, enforce_sorted=False)
 
         gru_seq, gru_last = self.gru(emb, hidden)
 
