@@ -287,6 +287,7 @@ class M2TMetrics(Metric):
                 metrics[f"gt_R_precision_top_{str(k+1)}"] = top_k_mat[k] / R_count
 
         # NLP metrics
+        print("Computing NLG metrics (BLEU, ROUGE, CIDEr)...")
         scores = self.nlg_evaluator(predictions=self.pred_texts,
                                     references=self.gt_texts)
         for key in scores.keys():
@@ -299,17 +300,23 @@ class M2TMetrics(Metric):
         metrics["ROUGE_L"] = torch.tensor(scores["rouge"]["rougeL"],
                                           device=self.device)
         metrics["CIDEr"] = torch.tensor(scores["cider"]['score'],device=self.device)
+        print("NLG metrics computed.")
 
         # Bert metrics
-        P, R, F1 = score_bert(self.pred_texts,
-                              self.gt_texts,
-                              lang='en',
-                              rescale_with_baseline=True,
-                              idf=True,
-                              device=self.device,
-                              verbose=False)
-
-        metrics["Bert_F1"] = F1.mean()
+        print("Computing BERTScore (this may take a while on first run)...")
+        try:
+            P, R, F1 = score_bert(self.pred_texts,
+                                  self.gt_texts,
+                                  lang='en',
+                                  rescale_with_baseline=True,
+                                  idf=True,
+                                  device=self.device,
+                                  verbose=True)  # Enable verbose to see progress
+            metrics["Bert_F1"] = F1.mean()
+            print(f"BERTScore computed: F1={F1.mean():.4f}")
+        except Exception as e:
+            print(f"Warning: BERTScore computation failed: {e}")
+            metrics["Bert_F1"] = torch.tensor(0.0, device=self.device)
 
         # Reset
         self.reset()

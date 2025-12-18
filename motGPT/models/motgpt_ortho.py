@@ -124,8 +124,13 @@ class MotGPTOrtho(BaseModel):
         try:
             embedding_weight = get_embedding_weight_from_model(self.lm.language_model)
             device = next(self.lm.language_model.parameters()).device
-            return self.ortho_loss(embedding_weight, self.lm.tokenizer, device)
+            loss = self.ortho_loss(embedding_weight, self.lm.tokenizer, device)
+            return loss
         except Exception as e:
+            # Print the error for debugging
+            print(f"[DEBUG] compute_ortho_loss failed: {e}")
+            import traceback
+            traceback.print_exc()
             # Fallback: return zero loss if something goes wrong
             device = next(self.lm.language_model.parameters()).device
             return torch.zeros((), device=device)
