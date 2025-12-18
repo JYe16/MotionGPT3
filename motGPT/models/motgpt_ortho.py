@@ -321,6 +321,11 @@ class MotGPTOrtho(BaseModel):
                                                 stage='test',
                                                 task='m2t',
                                                 tasks=tasks)
+        
+        # IMPORTANT: renorm4t2m converts from training Mean/Std to evaluator Mean/Std
+        # This is required for correct R-precision computation with the T2M evaluator
+        feats_ref = self.datamodule.renorm4t2m(feats_ref)
+        
         rs_set = {
             "m_ref": feats_ref,
             "t_ref": all_captions,
@@ -573,6 +578,10 @@ class MotGPTOrtho(BaseModel):
                         )
 
         if split in ["val", "test"]:
+            if self.hparams.task == "m2t":
+                # Return full data for M2T CSV saving: (t_pred, length, m_ref, t_ref, fname)
+                return (rs_set["t_pred"], rs_set["length"], rs_set.get("m_ref"), 
+                        rs_set.get("t_ref"), batch.get("fname", []))
             return rs_set["t_pred"], rs_set["length"]
 
         return loss

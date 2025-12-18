@@ -230,6 +230,10 @@ class MotionGPT(BaseModel):
                                                task="m2t",
                                                stage='test')
 
+        # IMPORTANT: renorm4t2m converts from training Mean/Std to evaluator Mean/Std
+        # This is required for correct R-precision computation with the T2M evaluator
+        feats_ref = self.datamodule.renorm4t2m(feats_ref)
+
         # return set
         rs_set = {
             "m_ref": feats_ref,

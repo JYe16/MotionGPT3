@@ -110,27 +110,47 @@ class BaseModel(LightningModule):
         
         csv_file = output_dir / f"predictions_m2t_rep{self.rep_i}_{cfg.TIME}.csv"
         
+        total_count = 0
+        empty_count = 0
+        
         with open(csv_file, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             writer.writerow(["filename", "predicted_text", "ground_truth_1", "ground_truth_2", "ground_truth_3"])
             
             for batch_output in outputs:
                 # batch_output for m2t: (t_pred, length, m_ref, t_ref, fname)
+                # Handle both old format (2 elements) and new format (5 elements)
+                if len(batch_output) < 5:
+                    # Old format: (t_pred, length) - skip saving
+                    continue
+                    
                 t_pred = batch_output[0]  # predicted texts
                 t_ref = batch_output[3]   # ground truth texts (all_captions)
                 fnames = batch_output[4]  # filenames
                 
+                if t_pred is None or t_ref is None:
+                    continue
+                
                 for idx in range(len(t_pred)):
+                    total_count += 1
                     pred_text = t_pred[idx] if t_pred[idx] else ""
+                    
+                    # Filter out empty predictions
+                    if not pred_text or pred_text.strip() == "":
+                        empty_count += 1
+                        continue
+                    
                     gt_texts = list(t_ref[idx]) if t_ref[idx] else ["", "", ""]
                     # Ensure we have 3 ground truth texts
                     while len(gt_texts) < 3:
                         gt_texts.append("")
-                    fname = fnames[idx].split('/')[-1] if fnames[idx] else ""
+                    fname = fnames[idx].split('/')[-1] if (fnames and idx < len(fnames) and fnames[idx]) else ""
                     
                     writer.writerow([fname, pred_text, gt_texts[0], gt_texts[1], gt_texts[2]])
         
         print(f"M2T predictions saved to {str(csv_file)}")
+        if empty_count > 0:
+            print(f"Filtered out {empty_count}/{total_count} empty predictions")
 
     def preprocess_state_dict(self, state_dict):
         new_state_dict = OrderedDict()

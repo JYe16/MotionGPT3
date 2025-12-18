@@ -29,7 +29,7 @@ DATASET:
   target: motGPT.data.HumanML3D_custom.HumanML3DDataModuleCustom
   CODE_PATH: motion_tokens_st_share # Using available path for verification
   HUMANML3D:
-    ROOT: ../../llm-sensing/data/humanml3d_263/ # User's original path
+    ROOT: ../llm-sensing/data/humanml3d_263/ # User's original path
     FPS: 20
     MIN_MOTION_LEN: 20
     MAX_MOTION_LEN: 196

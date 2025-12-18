@@ -242,8 +242,6 @@ class M2TMetrics(Metric):
             all_gttexts = torch.cat(self.gttext_embeddings,
                                     axis=0).cpu()[shuffle_idx, :]
 
-        print("Computing metrics...")
-
         # Compute r-precision
         if len(self.gtmotion_embeddings) > 0:
             assert count_seq >= self.R_size
@@ -287,12 +285,8 @@ class M2TMetrics(Metric):
                 metrics[f"gt_R_precision_top_{str(k+1)}"] = top_k_mat[k] / R_count
 
         # NLP metrics
-        print("Computing NLG metrics (BLEU, ROUGE, CIDEr)...")
         scores = self.nlg_evaluator(predictions=self.pred_texts,
                                     references=self.gt_texts)
-        print(f"DEBUG: NLG scores keys: {scores.keys()}")
-        for key in scores.keys():
-            print(f"DEBUG: scores['{key}'] = {scores[key]}")
         
         for key in scores.keys():
             if 'bleu' in key:
@@ -334,18 +328,16 @@ class M2TMetrics(Metric):
             metrics["CIDEr"] = torch.tensor(0.0, device=self.device)
         print("NLG metrics computed.")
 
-        # Bert metrics - use CPU to avoid GPU OOM when LoRA/PEFT is enabled
-        print("Computing BERTScore on CPU (to avoid GPU memory issues)...")
+        # Bert metrics - use GPU for faster computation
         try:
             P, R, F1 = score_bert(self.pred_texts,
                                   self.gt_texts,
                                   lang='en',
                                   rescale_with_baseline=True,
                                   idf=True,
-                                  device='cpu',  # Use CPU to avoid GPU OOM
-                                  verbose=True)
+                                  device=self.device,
+                                  verbose=False)
             metrics["Bert_F1"] = F1.mean().to(self.device)
-            print(f"BERTScore computed: F1={F1.mean():.4f}")
         except Exception as e:
             print(f"Warning: BERTScore computation failed: {e}")
             metrics["Bert_F1"] = torch.tensor(0.0, device=self.device)

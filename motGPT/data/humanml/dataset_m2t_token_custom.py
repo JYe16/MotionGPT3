@@ -72,15 +72,24 @@ class Motion2TextDatasetTokenCustom(data.Dataset):
                 if not os.path.exists(token_file):
                     continue
                 
-                # 2. 检查长度 (快速读取)
+                # 2. 加载 tokens
                 tokens = np.load(token_file)
                 if len(tokens.shape) > 1:
                     tokens = tokens.flatten()
-                    
-                if len(tokens) < self.min_motion_length or len(tokens) >= self.max_motion_length:
+                
+                # 3. 基于 MOTION 帧数过滤 (不是 token 长度!)
+                # 需要加载 motion 文件来获取真实帧数
+                motion_file = pjoin(self.motion_dir, name + '.npy')
+                if not os.path.exists(motion_file):
+                    continue
+                motion = np.load(motion_file)
+                motion_length = len(motion)
+                
+                # 标准过滤: min=40, max<200 for HumanML3D evaluation
+                if motion_length < self.min_motion_length or motion_length >= self.max_motion_length:
                     continue
 
-                # 3. 加载文本
+                # 4. 加载文本
                 text_path = pjoin(self.text_dir, name + '.txt')
                 if not os.path.exists(text_path):
                     continue
@@ -102,6 +111,8 @@ class Motion2TextDatasetTokenCustom(data.Dataset):
                 if len(text_data) > 0:
                     data_dict[name] = {
                         'token_path': token_file,
+                        'motion_path': motion_file,
+                        'motion_length': motion_length,
                         'text': text_data
                     }
                     new_name_list.append(name)
