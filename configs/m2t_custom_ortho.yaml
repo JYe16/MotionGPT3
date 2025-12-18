@@ -2,7 +2,7 @@
 # This config uses MotGPTOrtho model to encourage orthogonal motion token embeddings
 # Key feature: Initialize motion token embeddings from VQ-VAE codebook via sparse projection
 
-NAME: M2T_Ortho_Sparse_Init
+NAME: M2T_Ortho_CodebookInit
 ACCELERATOR: 'gpu'
 DEVICE: [0]
 NUM_NODES: 1
