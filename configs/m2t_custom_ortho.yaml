@@ -29,7 +29,8 @@ LORA:
     - c_proj
 
 TEST:
-  CHECKPOINTS: 'checkpoints/last.ckpt'
+  # CHECKPOINTS: 'checkpoints/last.ckpt'
+  CHECKPOINTS: 'experiments/motgpt_ortho/debug--M2T_Ortho_CodebookInit_LoRA/checkpoints/last-v1.ckpt'
   SPLIT: test
   BATCH_SIZE: 64
 
@@ -59,15 +60,10 @@ DATASET:
     MAX_MOTION_LEN: 196
 
 model:
-  # 使用带正交损失的模型
   target: motGPT.models.motgpt_ortho.MotGPTOrtho
   params:
     condition: 'motion'
     task: 'm2t'
-    # =====================================================
-    # 正交损失权重 - 可以调整这个值
-    # 建议从小值开始 (0.01-0.1)，观察效果后再调整
-    # =====================================================
     lambda_ortho: 0.1
     lm:
       target: motGPT.archs.mgpt_lm.MLM
