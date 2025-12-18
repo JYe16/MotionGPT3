@@ -128,12 +128,20 @@ def get_embedding_weight_from_model(model) -> torch.Tensor:
     Extract the embedding weight matrix from different model architectures.
     
     Args:
-        model: The language model (GPT2, T5, etc.)
+        model: The language model (GPT2, T5, etc.), possibly wrapped by PEFT/LoRA
         
     Returns:
         The embedding weight tensor.
     """
-    # For GPT2LMHeadModel
+    # For PEFT-wrapped models (LoRA)
+    if hasattr(model, 'base_model') and hasattr(model.base_model, 'model'):
+        base_model = model.base_model.model
+        if hasattr(base_model, 'transformer') and hasattr(base_model.transformer, 'wte'):
+            return base_model.transformer.wte.weight
+        if hasattr(base_model, 'shared'):
+            return base_model.shared.weight
+    
+    # For GPT2LMHeadModel (non-wrapped)
     if hasattr(model, 'transformer') and hasattr(model.transformer, 'wte'):
         return model.transformer.wte.weight
     
