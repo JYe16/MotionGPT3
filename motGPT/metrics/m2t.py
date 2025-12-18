@@ -290,29 +290,61 @@ class M2TMetrics(Metric):
         print("Computing NLG metrics (BLEU, ROUGE, CIDEr)...")
         scores = self.nlg_evaluator(predictions=self.pred_texts,
                                     references=self.gt_texts)
+        print(f"DEBUG: NLG scores keys: {scores.keys()}")
+        for key in scores.keys():
+            print(f"DEBUG: scores['{key}'] = {scores[key]}")
+        
         for key in scores.keys():
             if 'bleu' in key:
                 metrics[key] = torch.tensor(scores[key]['score'],device=self.device)
         # for k in range(1, self.bleu_k + 1):
         #     metrics[f"Bleu_{str(k)}"] = torch.tensor(scores[f'bleu_{str(k)}'],
         #                                              device=self.device)
-            
-        metrics["ROUGE_L"] = torch.tensor(scores["rouge"]["rougeL"],
-                                          device=self.device)
-        metrics["CIDEr"] = torch.tensor(scores["cider"]['score'],device=self.device)
+        
+        # Handle ROUGE score - format may vary depending on nlgmetricverse version
+        if "rouge" in scores:
+            rouge_data = scores["rouge"]
+            if isinstance(rouge_data, dict):
+                if "rougeL" in rouge_data:
+                    rouge_l_val = rouge_data["rougeL"]
+                elif "score" in rouge_data:
+                    rouge_l_val = rouge_data["score"]
+                else:
+                    # Try to find any rouge-L related key
+                    rouge_l_val = rouge_data.get("rouge-l", rouge_data.get("rougeLsum", 0.0))
+                    if isinstance(rouge_l_val, dict):
+                        rouge_l_val = rouge_l_val.get("score", rouge_l_val.get("fmeasure", 0.0))
+            else:
+                rouge_l_val = float(rouge_data) if rouge_data else 0.0
+            metrics["ROUGE_L"] = torch.tensor(rouge_l_val, device=self.device)
+        else:
+            print("Warning: 'rouge' not found in scores, setting ROUGE_L to 0")
+            metrics["ROUGE_L"] = torch.tensor(0.0, device=self.device)
+        
+        # Handle CIDEr score
+        if "cider" in scores:
+            cider_data = scores["cider"]
+            if isinstance(cider_data, dict) and "score" in cider_data:
+                cider_val = cider_data["score"]
+            else:
+                cider_val = float(cider_data) if cider_data else 0.0
+            metrics["CIDEr"] = torch.tensor(cider_val, device=self.device)
+        else:
+            print("Warning: 'cider' not found in scores, setting CIDEr to 0")
+            metrics["CIDEr"] = torch.tensor(0.0, device=self.device)
         print("NLG metrics computed.")
 
-        # Bert metrics
-        print("Computing BERTScore (this may take a while on first run)...")
+        # Bert metrics - use CPU to avoid GPU OOM when LoRA/PEFT is enabled
+        print("Computing BERTScore on CPU (to avoid GPU memory issues)...")
         try:
             P, R, F1 = score_bert(self.pred_texts,
                                   self.gt_texts,
                                   lang='en',
                                   rescale_with_baseline=True,
                                   idf=True,
-                                  device=self.device,
-                                  verbose=True)  # Enable verbose to see progress
-            metrics["Bert_F1"] = F1.mean()
+                                  device='cpu',  # Use CPU to avoid GPU OOM
+                                  verbose=True)
+            metrics["Bert_F1"] = F1.mean().to(self.device)
             print(f"BERTScore computed: F1={F1.mean():.4f}")
         except Exception as e:
             print(f"Warning: BERTScore computation failed: {e}")

@@ -15,8 +15,8 @@ CODEBOOK_PATH: checkpoints/codebook_st_share.pt
 # =====================================================
 LORA:
   ENABLED: true
-  r: 16                      # LoRA rank (lower = fewer params, typical: 4-16)
-  lora_alpha: 32            # LoRA scaling factor (typical: 2x rank)
+  r: 8                      # LoRA rank (lower = fewer params, typical: 4-16)
+  lora_alpha: 16           # LoRA scaling factor (typical: 2x rank)
   lora_dropout: 0.05        # Dropout for LoRA layers
   # train_embeddings options:
   #   - 'motion_only': Only train motion token embeddings (indices 50257+), most efficient
@@ -36,7 +36,7 @@ TEST:
 TRAIN:
   STAGE: token_custom
   instruction_type: m2t
-  BATCH_SIZE: 20
+  BATCH_SIZE: 16
   END_EPOCH: 100
   LR_SCHEDULER:
     target: CosineAnnealingLR
