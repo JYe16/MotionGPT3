@@ -1,16 +1,17 @@
-NAME: Custom_M2T_Training
+# M2T Training with Orthogonality Regularization
+# This config uses MotGPTOrtho model to encourage orthogonal motion token embeddings
+
+NAME: Custom_M2T_Training_Ortho
 ACCELERATOR: 'gpu'
 DEVICE: [0]
 NUM_NODES: 1
 
 TEST:
   CHECKPOINTS: 'checkpoints/last.ckpt'
-  # CHECKPOINTS: 'experiments/motgpt/Custom_M2T_Training/checkpoints/last.ckpt'
   SPLIT: test
   BATCH_SIZE: 64
 
 TRAIN:
-  # 使用我们自定义的 STAGE 名称来触发 Motion2TextDatasetTokenCustom
   STAGE: token_custom
   instruction_type: m2t
   BATCH_SIZE: 256
@@ -27,24 +28,25 @@ TRAIN:
       weight_decay: 0.01
 
 DATASET:
-  # 指向我们新建的 DataModule (Fixed module name)
   target: motGPT.data.HumanML3D_custom.HumanML3DDataModuleCustom
-  # 你的 token 文件夹名称或路径 (相对于 DATASET.HUMANML3D.ROOT 或绝对路径)
-  # 假设你的数据结构是 data/humanml3d_263/motion_tokens
-  # CODE_PATH: motion_tokens_ser0.4 # User's original path
-  CODE_PATH: motion_tokens_st_share # Using available path for verification
+  CODE_PATH: motion_tokens_st_share
   HUMANML3D:
-    ROOT: ../../llm-sensing/data/humanml3d_263/ # User's original path
-    # ROOT: datasets/humanml3d/ # Using workspace path
+    ROOT: ../../llm-sensing/data/humanml3d_263/
     FPS: 20
     MIN_MOTION_LEN: 20
     MAX_MOTION_LEN: 196
 
 model:
-  target: motGPT.models.motgpt.MotGPT
+  # 使用带正交损失的模型
+  target: motGPT.models.motgpt_ortho.MotGPTOrtho
   params:
     condition: 'motion'
     task: 'm2t'
+    # =====================================================
+    # 正交损失权重 - 可以调整这个值
+    # 建议从小值开始 (0.01-0.1)，观察效果后再调整
+    # =====================================================
+    lambda_ortho: 0.1
     lm:
       target: motGPT.archs.mgpt_lm.MLM
       params:
@@ -52,13 +54,11 @@ model:
         model_path: deps/gpt2
         stage: ${TRAIN.STAGE}
         ablation: ${ABLATION}
-        # 修改这里以匹配你 VQ-VAE 的码本大小 (例如 512 或 1024)
         motion_codebook_size: 512
-        vocab_size: 512 # MotionGPT 默认词表大小
+        vocab_size: 512
     motion_vae:
       target: motGPT.archs.mld_vae.MldVae
       params:
-        # 修改这里以匹配你 VQ-VAE 的码本大小
         code_num: 512
         code_dim: 512
         nfeats: ${DATASET.NFEATS}
