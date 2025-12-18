@@ -1,14 +1,15 @@
-# M2T Training with Orthogonality Regularization
-# This config uses MotGPTOrtho model to encourage orthogonal motion token embeddings
-# Key feature: Initialize motion token embeddings from VQ-VAE codebook via sparse projection
+# M2T Training with tunable generation parameters for better R-precision
+# 
+# 调参建议：
+# 1. num_beams: 增加到 3-5 可能提升生成质量
+# 2. temperature: 降低到 0.5-0.7 使输出更确定
+# 3. max_gen_length: 增加到 60 可能包含更多细节
+# 4. do_sample: False 使用贪婪/beam search, True 使用采样
 
-NAME: M2T_Ortho_Sparse_Init
+NAME: Custom_M2T_Training_Tuned
 ACCELERATOR: 'gpu'
 DEVICE: [0]
 NUM_NODES: 1
-
-# Path to VQ-VAE codebook for motion token embedding initialization
-CODEBOOK_PATH: checkpoints/codebook_st_share.pt
 
 TEST:
   CHECKPOINTS: 'checkpoints/last.ckpt'
@@ -41,16 +42,10 @@ DATASET:
     MAX_MOTION_LEN: 196
 
 model:
-  # 使用带正交损失的模型
-  target: motGPT.models.motgpt_ortho.MotGPTOrtho
+  target: motGPT.models.motgpt.MotGPT
   params:
     condition: 'motion'
     task: 'm2t'
-    # =====================================================
-    # 正交损失权重 - 可以调整这个值
-    # 建议从小值开始 (0.01-0.1)，观察效果后再调整
-    # =====================================================
-    lambda_ortho: 0.1
     lm:
       target: motGPT.archs.mgpt_lm.MLM
       params:
@@ -60,6 +55,14 @@ model:
         ablation: ${ABLATION}
         motion_codebook_size: 512
         vocab_size: 512
+        # =====================================================
+        # 生成参数 - 调整这些来提升 R-precision
+        # =====================================================
+        # m2t_num_beams: 5        # beam search width
+        # m2t_do_sample: False    # greedy/beam if False, sampling if True
+        # m2t_temperature: 0.7    # lower = more deterministic
+        # m2t_top_p: 0.9          # nucleus sampling threshold
+        # m2t_max_length: 60      # max generated text length
     motion_vae:
       target: motGPT.archs.mld_vae.MldVae
       params:
