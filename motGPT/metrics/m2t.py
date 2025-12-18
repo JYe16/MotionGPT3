@@ -362,19 +362,8 @@ class M2TMetrics(Metric):
         self.count += sum(lengths)
         self.count_seq += len(lengths)
 
-        # motion encoder
-        m_lens = torch.tensor(lengths, device=feats_ref.device)
-        align_idx = np.argsort(m_lens.data.tolist())[::-1].copy()
-        feats_ref = feats_ref[align_idx]
-        # m_lens = m_lens[align_idx]
-        # m_lens = torch.div(m_lens,
-        #                    self.cfg.DATASET.HUMANML3D.UNIT_LEN,
-        #                    rounding_mode="floor")
-        # ref_mov = self.t2m_moveencoder(feats_ref[..., :-4]).detach()
-        # m_lens = m_lens // self.unit_length
-        # ref_emb = self.t2m_motionencoder(ref_mov, m_lens)
-        # gtmotion_embeddings = torch.flatten(ref_emb, start_dim=1).detach()
-        predtext_emb = self._get_text_embeddings(pred_texts)[align_idx]
+        # Get motion embeddings (no sorting needed, pack_padded_sequence uses enforce_sorted=False)
+        predtext_emb = self._get_text_embeddings(pred_texts)
         predtext_embeddings = torch.flatten(predtext_emb, start_dim=1).detach()
         self.predtext_embeddings.append(predtext_embeddings)
 
@@ -382,9 +371,9 @@ class M2TMetrics(Metric):
             gtmotion_embeddings = self.get_motion_embeddings(feats_ref, lengths)
             self.gtmotion_embeddings.append(gtmotion_embeddings)
 
-            # text encoder
+            # text encoder (no sorting needed)
             gttext_emb = self.t2m_textencoder(word_embs, pos_ohot,
-                                              text_lengths)[align_idx]
+                                              text_lengths)
             gttext_embeddings = torch.flatten(gttext_emb, start_dim=1).detach()
             self.gttext_embeddings.append(gttext_embeddings)
 
