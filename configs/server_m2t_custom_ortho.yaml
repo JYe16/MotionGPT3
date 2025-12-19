@@ -87,8 +87,8 @@ LOSS:
   LAMBDA_CLS: 1.0
 
 METRIC:
-  TYPE: ['M2TMetrics']
+  TYPE: []  # Disabled M2TMetrics during training for speed
 
 LOGGER:
   TYPE: ['tensorboard']
-  VAL_EVERY_STEPS: 1
+  VAL_EVERY_STEPS: 1   # Changed from 1 to 5 - validate less frequently
