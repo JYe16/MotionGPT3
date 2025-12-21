@@ -63,7 +63,7 @@ LOSS:
   LAMBDA_CLS: 1.0
 
 METRIC:
-  TYPE: ['M2TMetrics']
+  TYPE: []
 
 LOGGER:
   TYPE: ['tensorboard']

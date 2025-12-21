@@ -14,7 +14,7 @@ CODEBOOK_PATH: checkpoints/codebook_st_share.pt
 # LoRA Configuration for Parameter-Efficient Training
 # =====================================================
 LORA:
-  ENABLED: true
+  ENABLED: false
   r: 8                      # LoRA rank (lower = fewer params, typical: 4-16)
   lora_alpha: 16           # LoRA scaling factor (typical: 2x rank)
   lora_dropout: 0.05        # Dropout for LoRA layers
@@ -29,8 +29,8 @@ LORA:
     - c_proj
 
 TEST:
-  CHECKPOINTS: 'checkpoints/no_ortho_no_init.ckpt'
-  # CHECKPOINTS: 'experiments/motgpt_ortho/debug--M2T_Ortho_CodebookInit_LoRA/checkpoints/last-v1.ckpt'
+  # CHECKPOINTS: 'checkpoints/no_ortho_no_init.ckpt'
+  CHECKPOINTS: 'experiments/motgpt_ortho/debug--M2T_Ortho_CodebookInit_LoRA/checkpoints/last-v7.ckpt'
   SPLIT: test
   BATCH_SIZE: 64
   REPLICATIONS: 1
@@ -38,7 +38,7 @@ TEST:
 TRAIN:
   STAGE: token_custom
   instruction_type: m2t
-  BATCH_SIZE: 16
+  BATCH_SIZE: 20
   END_EPOCH: 100
   LR_SCHEDULER:
     target: CosineAnnealingLR
@@ -55,9 +55,9 @@ DATASET:
   target: motGPT.data.HumanML3D_custom.HumanML3DDataModuleCustom
   CODE_PATH: motion_tokens_st_share
   HUMANML3D:
-    ROOT: ../llm-sensing/data/humanml3d_263/
+    ROOT: /home/jackieye/code/llm-sensing/data/humanml3d_263/
     FPS: 20
-    MIN_MOTION_LEN: 40    # Standard HumanML3D evaluation: min=40 frames
+    MIN_MOTION_LEN: 20    # Standard HumanML3D evaluation: min=40 frames
     MAX_MOTION_LEN: 200   # Standard HumanML3D evaluation: max<200 frames
 
 model:
@@ -65,7 +65,7 @@ model:
   params:
     condition: 'motion'
     task: 'm2t'
-    lambda_ortho: 0.1
+    lambda_ortho: 0.01
     lm:
       target: motGPT.archs.mgpt_lm.MLM
       params:
@@ -88,7 +88,9 @@ LOSS:
   LAMBDA_CLS: 1.0
 
 METRIC:
-  TYPE: ['M2TMetrics']
+  TASK: 'm2t'
+  TYPE: []
+  # TYPE: ['M2TMetrics']
 
 LOGGER:
   TYPE: ['tensorboard']
