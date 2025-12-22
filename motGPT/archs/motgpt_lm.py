@@ -154,8 +154,17 @@ class MLM(nn.Module):
             language_model.transformer._attn_implementation = "sdpa"
             # state_dict = torch.load(f'{model_path}/model_state_dict.pth')
             self.lm_type = 'dec'
+        elif model_type == "llama":
+            from transformers.models.llama.modeling_llama import LlamaConfig
+            from mot_code.mot_example_llama_sepattn import MoTLlamaForCausalLM
+            mconfig = LlamaConfig.from_pretrained(f'{model_path}/config.json')
+            language_model = MoTLlamaForCausalLM(
+                    mconfig, motion_codebook_size=all_motion_token_num, 
+                    mot_factor=mot_factor, attention_mode=attention_mode
+                )
+            self.lm_type = 'dec'
         else:
-            raise ValueError("type must be either seq2seq or conditional")
+            raise ValueError("type must be t5, gpt2, or llama")
 
         # Instantiate tokenizer
         self.tokenizer = AutoTokenizer.from_pretrained(model_path, legacy=True)
@@ -174,18 +183,45 @@ class MLM(nn.Module):
         if self.lm_type == 'dec':
             self.tokenizer.pad_token = self.tokenizer.eos_token
             self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
+            self.tokenizer.padding_side = 'left'  # Required for decoder-only models
 
-        # load state_dict from pth
-        state_dict = torch.load(f'{model_path}/model_state_dict.pth')
-        new_state_dict = state_dict.copy()
-        if 'encoder.embed_tokens.weight' in new_state_dict: # model_type == "t5"
-            new_state_dict.pop('encoder.embed_tokens.weight')
-            new_state_dict.pop('decoder.embed_tokens.weight')
-
-        msg = language_model.load_state_dict(new_state_dict, strict=False)
-        if len(msg.unexpected_keys)>0:
-            print('unexpected_keys keys:', msg.unexpected_keys)
-            exit()
+        # load state_dict from pth or safetensors
+        state_dict_path_pth = f'{model_path}/model_state_dict.pth'
+        state_dict_path_safetensors = f'{model_path}/model.safetensors'
+        
+        if os.path.exists(state_dict_path_pth):
+            state_dict = torch.load(state_dict_path_pth)
+            new_state_dict = state_dict.copy()
+            if 'encoder.embed_tokens.weight' in new_state_dict:  # model_type == "t5"
+                new_state_dict.pop('encoder.embed_tokens.weight')
+                new_state_dict.pop('decoder.embed_tokens.weight')
+            
+            msg = language_model.load_state_dict(new_state_dict, strict=False)
+            if len(msg.unexpected_keys) > 0:
+                print('unexpected_keys keys:', msg.unexpected_keys)
+                exit()
+        elif os.path.exists(state_dict_path_safetensors):
+            # Load from safetensors (LLaMA format)
+            state_dict = load_file(state_dict_path_safetensors)
+            # For LLaMA, we need to handle the model prefix
+            new_state_dict = {}
+            for k, v in state_dict.items():
+                # Map LLaMA weights to MoT model structure
+                if k.startswith('model.'):
+                    new_key = k.replace('model.', 'model.')
+                else:
+                    new_key = k
+                new_state_dict[new_key] = v
+            
+            msg = language_model.load_state_dict(new_state_dict, strict=False)
+            print(f'Loaded LLaMA weights. Missing keys: {len(msg.missing_keys)}, Unexpected keys: {len(msg.unexpected_keys)}')
+            if len(msg.missing_keys) > 0:
+                print('Missing keys (first 10):', msg.missing_keys[:10])
+            state_dict = new_state_dict
+        else:
+            print(f"Warning: No pretrained weights found at {model_path}")
+            print("Using randomly initialized weights for language model.")
+            state_dict = {}
         # print('missing keys:', msg.missing_keys)
         self.language_model = language_model
         self.language_model.train()

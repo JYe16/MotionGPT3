@@ -7,7 +7,7 @@ import heapq
 import torch
 from torch import Tensor, nn
 from torch.distributions.distribution import Distribution
-from transformers import AutoModelForSeq2SeqLM, T5ForConditionalGeneration, T5Tokenizer, AutoTokenizer, GPT2LMHeadModel, GPT2Tokenizer
+from transformers import AutoModelForSeq2SeqLM, T5ForConditionalGeneration, T5Tokenizer, AutoTokenizer, GPT2LMHeadModel, GPT2Tokenizer, LlamaForCausalLM
 import random
 from typing import Optional
 from .tools.token_emb import NewTokenEmb
@@ -57,11 +57,19 @@ class MLM(nn.Module):
         elif model_type == "gpt2":
             self.language_model = GPT2LMHeadModel.from_pretrained(model_path)
             self.lm_type = 'dec'
+        elif model_type == "llama":
+            self.language_model = LlamaForCausalLM.from_pretrained(
+                model_path, 
+                torch_dtype=torch.float16,  # Use float16 instead of bfloat16 for better CUDA compatibility
+                low_cpu_mem_usage=True
+            )
+            self.lm_type = 'dec'
         else:
-            raise ValueError("type must be either seq2seq or conditional")
+            raise ValueError("type must be t5, gpt2, or llama")
 
         if self.lm_type == 'dec':
             self.tokenizer.pad_token = self.tokenizer.eos_token
+            self.tokenizer.padding_side = 'left'  # Required for decoder-only models
 
         # Add motion tokens
         self.tokenizer.add_tokens(

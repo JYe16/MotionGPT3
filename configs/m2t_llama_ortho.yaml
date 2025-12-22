@@ -1,8 +1,8 @@
-# M2T Training with Orthogonality Regularization
-# This config uses MotGPTOrtho model to encourage orthogonal motion token embeddings
-# Key feature: Initialize motion token embeddings from VQ-VAE codebook via sparse projection
+# M2T Training with LLaMA 3.2-1B
+# This config uses LLaMA as the language model backbone instead of GPT2
+# Key feature: Larger model capacity with 2048 hidden size
 
-NAME: M2T_Ortho0_CodebookInit
+NAME: M2T_LLaMA_Ortho_CodebookInit
 ACCELERATOR: 'gpu'
 DEVICE: [0]
 NUM_NODES: 1
@@ -12,33 +12,35 @@ CODEBOOK_PATH: checkpoints/codebook_st_share.pt
 
 # =====================================================
 # LoRA Configuration for Parameter-Efficient Training
+# Critical for LLaMA due to its larger size (1.2B params)
 # =====================================================
 LORA:
-  ENABLED: false
-  r: 8                      # LoRA rank (lower = fewer params, typical: 4-16)
-  lora_alpha: 16           # LoRA scaling factor (typical: 2x rank)
-  lora_dropout: 0.05        # Dropout for LoRA layers
+  ENABLED: true
+  r: 16                      # LoRA rank (higher for LLaMA due to larger hidden dim)
+  lora_alpha: 32             # LoRA scaling factor (typical: 2x rank)
+  lora_dropout: 0.05         # Dropout for LoRA layers
   # train_embeddings options:
-  #   - 'motion_only': Only train motion token embeddings (indices 50257+), most efficient
-  #   - 'all': Train entire embedding layer (wte + lm_head)
+  #   - 'motion_only': Only train motion token embeddings (indices 128256+), most efficient
+  #   - 'all': Train entire embedding layer (embed_tokens + lm_head)
   #   - false: Don't train any embeddings, only LoRA params
   train_embeddings: 'motion_only'
-  # Target modules for GPT2: c_attn (QKV attention), c_proj (output projection)
+  # Target modules for LLaMA: q_proj, k_proj, v_proj, o_proj (attention projections)
   target_modules:
-    - c_attn
-    - c_proj
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
 
 TEST:
-  CHECKPOINTS: 'checkpoints/no-lora-ortho0.ckpt'
-  # CHECKPOINTS: 'experiments/motgpt_ortho/debug--M2T_Ortho_CodebookInit_LoRA/checkpoints/last-v7.ckpt'
+  CHECKPOINTS: null
   SPLIT: test
-  BATCH_SIZE: 64
+  BATCH_SIZE: 32
   REPLICATIONS: 1
 
 TRAIN:
   STAGE: token_custom
   instruction_type: m2t
-  BATCH_SIZE: 20
+  BATCH_SIZE: 8              # Smaller batch size due to larger model
   END_EPOCH: 100
   LR_SCHEDULER:
     target: CosineAnnealingLR
@@ -48,7 +50,7 @@ TRAIN:
   OPTIM:
     target: AdamW
     params:
-      lr: 1e-4
+      lr: 5e-5               # Lower LR for larger model
       weight_decay: 0.01
 
 DATASET:
@@ -57,8 +59,8 @@ DATASET:
   HUMANML3D:
     ROOT: /home/jackieye/code/llm-sensing/data/humanml3d_263/
     FPS: 20
-    MIN_MOTION_LEN: 20    # Standard HumanML3D evaluation: min=40 frames
-    MAX_MOTION_LEN: 196   # Standard HumanML3D evaluation: max<200 frames
+    MIN_MOTION_LEN: 20
+    MAX_MOTION_LEN: 200
 
 model:
   target: motGPT.models.motgpt_ortho.MotGPTOrtho
@@ -69,8 +71,8 @@ model:
     lm:
       target: motGPT.archs.mgpt_lm.MLM
       params:
-        model_type: gpt2
-        model_path: deps/gpt2
+        model_type: llama          # Use LLaMA instead of GPT2
+        model_path: deps/llama3.2-1b
         stage: ${TRAIN.STAGE}
         ablation: ${ABLATION}
         motion_codebook_size: 512
@@ -89,7 +91,6 @@ LOSS:
 
 METRIC:
   TASK: 'm2t'
-  # TYPE: []
   TYPE: ['M2TMetrics']
 
 LOGGER:

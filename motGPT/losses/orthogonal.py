@@ -128,7 +128,7 @@ def get_embedding_weight_from_model(model) -> torch.Tensor:
     Extract the embedding weight matrix from different model architectures.
     
     Args:
-        model: The language model (GPT2, T5, etc.), possibly wrapped by PEFT/LoRA
+        model: The language model (GPT2, T5, LLaMA, etc.), possibly wrapped by PEFT/LoRA
         
     Returns:
         The embedding weight tensor.
@@ -136,8 +136,13 @@ def get_embedding_weight_from_model(model) -> torch.Tensor:
     # For PEFT-wrapped models (LoRA)
     if hasattr(model, 'base_model') and hasattr(model.base_model, 'model'):
         base_model = model.base_model.model
+        # GPT2
         if hasattr(base_model, 'transformer') and hasattr(base_model.transformer, 'wte'):
             return base_model.transformer.wte.weight
+        # LLaMA (PEFT wrapped)
+        if hasattr(base_model, 'model') and hasattr(base_model.model, 'embed_tokens'):
+            return base_model.model.embed_tokens.weight
+        # T5
         if hasattr(base_model, 'shared'):
             return base_model.shared.weight
     
@@ -145,14 +150,18 @@ def get_embedding_weight_from_model(model) -> torch.Tensor:
     if hasattr(model, 'transformer') and hasattr(model.transformer, 'wte'):
         return model.transformer.wte.weight
     
+    # For LLaMA/MoTLlama (non-wrapped) - model.model.embed_tokens
+    if hasattr(model, 'model') and hasattr(model.model, 'embed_tokens'):
+        return model.model.embed_tokens.weight
+    
     # For T5
     if hasattr(model, 'shared'):
         return model.shared.weight
     
-    # For models with get_input_embeddings
+    # For models with get_input_embeddings (fallback)
     if hasattr(model, 'get_input_embeddings'):
         emb = model.get_input_embeddings()
-        if hasattr(emb, 'weight'):
+        if emb is not None and hasattr(emb, 'weight'):
             return emb.weight
     
     raise ValueError("Cannot find embedding weight in model")

@@ -113,12 +113,13 @@ def create_sparse_projection(input_dim: int, output_dim: int, sparsity: float = 
 
 def initialize_motion_token_embeddings(model, codebook_weight: torch.Tensor, 
                                        original_vocab_size: int = 50257,
+                                       model_type: str = "gpt2",
                                        logger=None):
     """
-    Initialize motion token embeddings in GPT2 using projected VQ-VAE codebook weights.
+    Initialize motion token embeddings in LLM using projected VQ-VAE codebook weights.
     
-    The GPT2 embedding layer has been resized to include motion tokens.
-    Original vocab size is 50257, motion tokens are added after (indices 50257+).
+    The LLM embedding layer has been resized to include motion tokens.
+    Original vocab size varies by model type, motion tokens are added after.
     
     Motion tokens:
         - <motion_id_0> to <motion_id_511>: 512 codebook tokens
@@ -127,26 +128,38 @@ def initialize_motion_token_embeddings(model, codebook_weight: torch.Tensor,
     Args:
         model: The MotGPTOrtho model
         codebook_weight: Tensor of shape [512, 512] from VQ-VAE
-        original_vocab_size: Original GPT2 vocab size (50257)
+        original_vocab_size: Original vocab size (50257 for GPT2, 128256 for LLaMA)
+        model_type: "gpt2" or "llama"
         logger: Optional logger
     """
-    # Get the GPT2 embedding layer
-    gpt2 = model.lm.language_model
-    embedding_layer = gpt2.transformer.wte  # word token embeddings
+    # Get the LLM embedding layer based on model type
+    lm = model.lm.language_model
+    
+    if model_type == "gpt2":
+        embedding_layer = lm.transformer.wte  # word token embeddings
+        lm_head = lm.lm_head if hasattr(lm, 'lm_head') else None
+    elif model_type == "llama":
+        embedding_layer = lm.model.embed_tokens
+        lm_head = lm.lm_head if hasattr(lm, 'lm_head') else None
+    else:
+        if logger:
+            logger.warning(f"Unknown model_type {model_type} for embedding initialization")
+        return
     
     # Get dimensions
     num_codes, code_dim = codebook_weight.shape  # [512, 512]
-    total_vocab_size, hidden_dim = embedding_layer.weight.shape  # [50772, 768]
+    total_vocab_size, hidden_dim = embedding_layer.weight.shape
     
     if logger:
         logger.info(f"=" * 60)
         logger.info(f"Initializing motion token embeddings from VQ-VAE codebook")
+        logger.info(f"  Model type: {model_type}")
         logger.info(f"  Codebook: {num_codes} codes × {code_dim} dim")
-        logger.info(f"  GPT2 embedding: {total_vocab_size} vocab × {hidden_dim} hidden")
+        logger.info(f"  LLM embedding: {total_vocab_size} vocab × {hidden_dim} hidden")
         logger.info(f"  Original vocab size: {original_vocab_size}")
         logger.info(f"  Motion token indices: {original_vocab_size} to {original_vocab_size + num_codes - 1}")
     
-    # Create sparse projection: [512, 768]
+    # Create sparse projection: [512, hidden_dim]
     projection_matrix = create_sparse_projection(
         input_dim=code_dim, 
         output_dim=hidden_dim,
@@ -159,18 +172,17 @@ def initialize_motion_token_embeddings(model, codebook_weight: torch.Tensor,
         nonzero_ratio = (projection_matrix != 0).float().mean().item()
         logger.info(f"  Projection non-zero ratio: {nonzero_ratio:.2%}")
     
-    # Project codebook to GPT2 hidden dimension: [512, 512] @ [512, 768] = [512, 768]
-    projected_codebook = codebook_weight @ projection_matrix  # [512, 768]
+    # Project codebook to LLM hidden dimension
+    projected_codebook = codebook_weight @ projection_matrix
     
-    # Normalize projected embeddings to match the scale of existing GPT2 embeddings
-    # Get the mean norm of existing GPT2 embeddings for reference
+    # Normalize projected embeddings to match the scale of existing embeddings
     with torch.no_grad():
-        existing_norms = embedding_layer.weight[:original_vocab_size].norm(dim=1)
+        existing_norms = embedding_layer.weight[:original_vocab_size].float().norm(dim=1)
         mean_norm = existing_norms.mean().item()
         std_norm = existing_norms.std().item()
         
         if logger:
-            logger.info(f"  Existing GPT2 embedding norms: mean={mean_norm:.4f}, std={std_norm:.4f}")
+            logger.info(f"  Existing {model_type} embedding norms: mean={mean_norm:.4f}, std={std_norm:.4f}")
         
         # Normalize projected codebook to have similar norms
         projected_norms = projected_codebook.norm(dim=1, keepdim=True)
@@ -180,7 +192,7 @@ def initialize_motion_token_embeddings(model, codebook_weight: torch.Tensor,
             new_norms = projected_codebook.norm(dim=1)
             logger.info(f"  Projected embedding norms: mean={new_norms.mean().item():.4f}, std={new_norms.std().item():.4f}")
     
-    # Initialize motion token embeddings (indices 50257 to 50257+511)
+    # Initialize motion token embeddings
     with torch.no_grad():
         motion_start_idx = original_vocab_size
         motion_end_idx = original_vocab_size + num_codes
@@ -188,13 +200,13 @@ def initialize_motion_token_embeddings(model, codebook_weight: torch.Tensor,
         # Copy projected codebook to embedding layer
         embedding_layer.weight[motion_start_idx:motion_end_idx] = projected_codebook.to(
             embedding_layer.weight.device
-        )
+        ).to(embedding_layer.weight.dtype)
         
-        # Also initialize the LM head (tied weights in GPT2, but just to be safe)
-        if hasattr(gpt2, 'lm_head') and gpt2.lm_head.weight is not embedding_layer.weight:
-            gpt2.lm_head.weight[motion_start_idx:motion_end_idx] = projected_codebook.to(
-                gpt2.lm_head.weight.device
-            )
+        # Also initialize the LM head (tied weights in some models, but just to be safe)
+        if lm_head is not None and lm_head.weight is not embedding_layer.weight:
+            lm_head.weight[motion_start_idx:motion_end_idx] = projected_codebook.to(
+                lm_head.weight.device
+            ).to(lm_head.weight.dtype)
     
     if logger:
         logger.info(f"  Successfully initialized {num_codes} motion token embeddings")
@@ -202,23 +214,25 @@ def initialize_motion_token_embeddings(model, codebook_weight: torch.Tensor,
         logger.info(f"=" * 60)
 
 
-def apply_lora_to_gpt2(model, lora_config: dict, original_vocab_size: int = 50257, logger=None):
+def apply_lora_to_llm(model, lora_config: dict, original_vocab_size: int = 50257, 
+                      model_type: str = "gpt2", logger=None):
     """
-    Apply LoRA (Low-Rank Adaptation) to the GPT2 model inside MotGPT.
+    Apply LoRA (Low-Rank Adaptation) to the LLM model inside MotGPT.
     
     This significantly reduces the number of trainable parameters while
     maintaining model performance. Importantly, this also ensures the 
     motion token embeddings remain trainable.
     
     Args:
-        model: The MotGPTOrtho model containing self.lm.language_model (GPT2)
+        model: The MotGPTOrtho model containing self.lm.language_model
         lora_config: Dictionary with LoRA hyperparameters:
             - r: LoRA rank (default: 8)
             - lora_alpha: LoRA alpha scaling (default: 16)
             - lora_dropout: Dropout probability (default: 0.05)
             - target_modules: Which modules to apply LoRA to
             - train_embeddings: 'all' (full embedding), 'motion_only' (only motion tokens), or False
-        original_vocab_size: GPT2 original vocab size (50257), used to identify motion tokens
+        original_vocab_size: Original vocab size (50257 for GPT2, 128256 for LLaMA)
+        model_type: "gpt2" or "llama"
         logger: Optional logger
     """
     if not PEFT_AVAILABLE:
@@ -231,12 +245,21 @@ def apply_lora_to_gpt2(model, lora_config: dict, original_vocab_size: int = 5025
     r = lora_config.get('r', 8)
     lora_alpha = lora_config.get('lora_alpha', 16)
     lora_dropout = lora_config.get('lora_dropout', 0.05)
-    target_modules = lora_config.get('target_modules', ['c_attn', 'c_proj'])
-    train_embeddings = lora_config.get('train_embeddings', 'motion_only')  # 'all', 'motion_only', or False
+    
+    # Default target modules based on model type
+    if model_type == "gpt2":
+        default_target_modules = ['c_attn', 'c_proj']
+    elif model_type == "llama":
+        default_target_modules = ['q_proj', 'k_proj', 'v_proj', 'o_proj']
+    else:
+        default_target_modules = ['c_attn', 'c_proj']
+    
+    target_modules = lora_config.get('target_modules', default_target_modules)
+    train_embeddings = lora_config.get('train_embeddings', 'motion_only')
     
     if logger:
         logger.info(f"=" * 60)
-        logger.info(f"Applying LoRA to GPT2")
+        logger.info(f"Applying LoRA to {model_type.upper()}")
         logger.info(f"  r (rank): {r}")
         logger.info(f"  lora_alpha: {lora_alpha}")
         logger.info(f"  lora_dropout: {lora_dropout}")
@@ -244,18 +267,17 @@ def apply_lora_to_gpt2(model, lora_config: dict, original_vocab_size: int = 5025
         logger.info(f"  train_embeddings: {train_embeddings}")
     
     # Count parameters before LoRA
-    gpt2 = model.lm.language_model
-    total_params_before = sum(p.numel() for p in gpt2.parameters())
-    trainable_params_before = sum(p.numel() for p in gpt2.parameters() if p.requires_grad)
+    llm = model.lm.language_model
+    total_params_before = sum(p.numel() for p in llm.parameters())
+    trainable_params_before = sum(p.numel() for p in llm.parameters() if p.requires_grad)
     
-    # Create LoRA config
-    # Determine modules_to_save based on train_embeddings setting
+    # Determine modules_to_save based on train_embeddings setting and model type
     modules_to_save = None
     if train_embeddings == 'all':
-        # Train entire embedding layer
-        modules_to_save = ['wte', 'lm_head']
-    # For 'motion_only' or False, we don't use modules_to_save
-    # We'll handle motion-only training separately after LoRA is applied
+        if model_type == "gpt2":
+            modules_to_save = ['wte', 'lm_head']
+        elif model_type == "llama":
+            modules_to_save = ['embed_tokens', 'lm_head']
     
     peft_config = LoraConfig(
         task_type=TaskType.CAUSAL_LM,
@@ -268,8 +290,8 @@ def apply_lora_to_gpt2(model, lora_config: dict, original_vocab_size: int = 5025
         bias="none",
     )
     
-    # Apply LoRA to GPT2
-    model.lm.language_model = get_peft_model(gpt2, peft_config)
+    # Apply LoRA
+    model.lm.language_model = get_peft_model(llm, peft_config)
     
     # If train_embeddings == 'motion_only', manually enable gradients for motion tokens only
     if train_embeddings == 'motion_only':
@@ -278,21 +300,27 @@ def apply_lora_to_gpt2(model, lora_config: dict, original_vocab_size: int = 5025
         
         # Get the embedding layer - need to navigate through PEFT wrapper
         peft_model = model.lm.language_model
-        base_model = peft_model.base_model.model  # Get underlying GPT2
+        base_model = peft_model.base_model.model
         
-        # Enable gradients for embedding layer but we'll use a hook to mask gradients
-        wte = base_model.transformer.wte
-        lm_head = base_model.lm_head
+        # Get embedding and lm_head based on model type
+        if model_type == "gpt2":
+            wte = base_model.transformer.wte
+            lm_head = base_model.lm_head
+        elif model_type == "llama":
+            wte = base_model.model.embed_tokens
+            lm_head = base_model.lm_head
+        else:
+            wte = base_model.transformer.wte
+            lm_head = base_model.lm_head
         
         # Make embedding layer require grad
         wte.weight.requires_grad = True
-        if lm_head.weight is not wte.weight:  # If not tied
+        if lm_head.weight is not wte.weight:
             lm_head.weight.requires_grad = True
         
         # Register hook to zero out gradients for non-motion tokens
         def create_embedding_grad_hook(vocab_size):
             def hook(grad):
-                # Zero out gradients for original vocab tokens
                 mask = torch.ones_like(grad)
                 mask[:vocab_size] = 0
                 return grad * mask
@@ -304,7 +332,7 @@ def apply_lora_to_gpt2(model, lora_config: dict, original_vocab_size: int = 5025
         
         num_motion_tokens = wte.weight.shape[0] - original_vocab_size
         hidden_dim = wte.weight.shape[1]
-        motion_params = num_motion_tokens * hidden_dim  # motion_tokens * hidden_dim
+        motion_params = num_motion_tokens * hidden_dim
         if logger:
             logger.info(f"  Motion token embeddings: {num_motion_tokens} tokens × {hidden_dim} dim = {motion_params:,} params")
     
@@ -326,15 +354,24 @@ def apply_lora_to_gpt2(model, lora_config: dict, original_vocab_size: int = 5025
         logger.info(f"  LoRA adapter params: {lora_params:,}")
         
         if train_embeddings == 'motion_only':
-            # Calculate effective trainable params
             peft_model = model.lm.language_model
             base_model = peft_model.base_model.model
-            total_vocab = base_model.transformer.wte.weight.shape[0]
-            hidden_dim = base_model.transformer.wte.weight.shape[1]
+            
+            if model_type == "gpt2":
+                wte = base_model.transformer.wte
+                lm_head = base_model.lm_head
+            elif model_type == "llama":
+                wte = base_model.model.embed_tokens
+                lm_head = base_model.lm_head
+            else:
+                wte = base_model.transformer.wte
+                lm_head = base_model.lm_head
+                
+            total_vocab = wte.weight.shape[0]
+            hidden_dim = wte.weight.shape[1]
             num_motion = total_vocab - original_vocab_size
             
-            # Check if wte and lm_head are tied (GPT2 default is tied)
-            wte_tied = base_model.transformer.wte.weight is base_model.lm_head.weight
+            wte_tied = wte.weight is lm_head.weight
             multiplier = 1 if wte_tied else 2
             
             motion_emb_params = num_motion * hidden_dim * multiplier
@@ -353,6 +390,110 @@ def apply_lora_to_gpt2(model, lora_config: dict, original_vocab_size: int = 5025
         model.lm.language_model.print_trainable_parameters()
     
     return model
+
+
+# Keep the old function name for backward compatibility
+def apply_lora_to_gpt2(model, lora_config: dict, original_vocab_size: int = 50257, logger=None):
+    """Backward compatible wrapper for apply_lora_to_llm with GPT2."""
+    return apply_lora_to_llm(model, lora_config, original_vocab_size, "gpt2", logger)
+
+
+def freeze_non_motion_embeddings(model, original_vocab_size: int, model_type: str, logger=None):
+    """
+    Freeze the embedding weights for non-motion tokens (original vocabulary).
+    
+    For non-GPT2 models like LLaMA, we explicitly freeze the original vocabulary embeddings
+    to ensure only motion token embeddings are updated during training.
+    
+    This is especially important because:
+    1. LLaMA has a much larger vocabulary (128k vs 50k) - more params to accidentally update
+    2. We want to preserve the pre-trained text understanding capabilities
+    3. Only motion tokens should be learned from scratch
+    
+    Args:
+        model: The MotGPTOrtho model (possibly with LoRA wrapper)
+        original_vocab_size: Original vocab size before adding motion tokens
+        model_type: "gpt2" or "llama"
+        logger: Optional logger
+    """
+    if logger:
+        logger.info(f"=" * 60)
+        logger.info(f"Freezing non-motion token embeddings for {model_type.upper()}")
+    
+    # Get the language model (possibly PEFT wrapped)
+    llm = model.lm.language_model
+    
+    # Navigate to the actual embedding layer
+    if hasattr(llm, 'base_model') and hasattr(llm.base_model, 'model'):
+        # PEFT-wrapped model
+        base_model = llm.base_model.model
+        if model_type == "gpt2":
+            embed_layer = base_model.transformer.wte
+            lm_head = base_model.lm_head if hasattr(base_model, 'lm_head') else None
+        elif model_type == "llama":
+            embed_layer = base_model.model.embed_tokens
+            lm_head = base_model.lm_head if hasattr(base_model, 'lm_head') else None
+        else:
+            if logger:
+                logger.warning(f"Unknown model_type {model_type}, skipping embedding freeze")
+            return
+    else:
+        # Non-wrapped model
+        if model_type == "gpt2":
+            embed_layer = llm.transformer.wte
+            lm_head = llm.lm_head if hasattr(llm, 'lm_head') else None
+        elif model_type == "llama":
+            embed_layer = llm.model.embed_tokens
+            lm_head = llm.lm_head if hasattr(llm, 'lm_head') else None
+        else:
+            if logger:
+                logger.warning(f"Unknown model_type {model_type}, skipping embedding freeze")
+            return
+    
+    total_vocab_size = embed_layer.weight.shape[0]
+    hidden_dim = embed_layer.weight.shape[1]
+    num_motion_tokens = total_vocab_size - original_vocab_size
+    
+    if logger:
+        logger.info(f"  Total vocab size: {total_vocab_size}")
+        logger.info(f"  Original vocab size (frozen): {original_vocab_size}")
+        logger.info(f"  Motion tokens (trainable): {num_motion_tokens}")
+        logger.info(f"  Hidden dim: {hidden_dim}")
+    
+    # Create a gradient hook that zeros out gradients for original vocabulary
+    def create_freeze_hook(frozen_size):
+        def hook(grad):
+            # Create mask: 0 for frozen tokens, 1 for motion tokens
+            mask = torch.ones_like(grad)
+            mask[:frozen_size] = 0
+            return grad * mask
+        return hook
+    
+    # Register hooks on embedding layer
+    embed_layer.weight.requires_grad = True
+    embed_layer.weight.register_hook(create_freeze_hook(original_vocab_size))
+    
+    if logger:
+        logger.info(f"  Registered gradient hook on embed_tokens layer")
+    
+    # Also register hook on lm_head if weights are not tied
+    if lm_head is not None and lm_head.weight is not embed_layer.weight:
+        lm_head.weight.requires_grad = True
+        lm_head.weight.register_hook(create_freeze_hook(original_vocab_size))
+        if logger:
+            logger.info(f"  Registered gradient hook on lm_head layer (untied weights)")
+    elif lm_head is not None:
+        if logger:
+            logger.info(f"  lm_head weights are tied with embed_tokens, no separate hook needed")
+    
+    # Calculate and log trainable embedding parameters
+    trainable_embed_params = num_motion_tokens * hidden_dim
+    if lm_head is not None and lm_head.weight is not embed_layer.weight:
+        trainable_embed_params *= 2  # Both embedding and lm_head
+    
+    if logger:
+        logger.info(f"  Effective trainable embedding params: {trainable_embed_params:,}")
+        logger.info(f"=" * 60)
 
 
 def main():
@@ -402,6 +543,16 @@ def main():
     # NEW: Initialize motion token embeddings from VQ-VAE codebook
     # =====================================================
     codebook_path = cfg.get('CODEBOOK_PATH', 'checkpoints/codebook_st_share.pt')
+    
+    # Determine model type and original vocab size
+    model_type = cfg.model.params.lm.params.get('model_type', 'gpt2')
+    if model_type == 'gpt2':
+        original_vocab_size = 50257
+    elif model_type == 'llama':
+        original_vocab_size = 128256  # LLaMA 3.2 vocab size
+    else:
+        original_vocab_size = 50257  # Default to GPT2
+        
     if os.path.exists(codebook_path):
         try:
             # Load VQ-VAE codebook weights
@@ -411,7 +562,8 @@ def main():
             initialize_motion_token_embeddings(
                 model=model,
                 codebook_weight=codebook_weight,
-                original_vocab_size=50257,  # GPT2 original vocab size
+                original_vocab_size=original_vocab_size,
+                model_type=model_type,
                 logger=logger
             )
         except Exception as e:
@@ -422,17 +574,19 @@ def main():
         logger.warning("Using default random initialization for motion token embeddings")
 
     # =====================================================
-    # NEW: Apply LoRA to GPT2 for parameter-efficient training
+    # NEW: Apply LoRA to LLM for parameter-efficient training
     # =====================================================
     lora_config = cfg.get('LORA', None)
     if lora_config and lora_config.get('ENABLED', False):
-        model = apply_lora_to_gpt2(
+        model = apply_lora_to_llm(
             model=model,
             lora_config=lora_config,
+            original_vocab_size=original_vocab_size,
+            model_type=model_type,
             logger=logger
         )
     else:
-        logger.info("LoRA disabled. Training full GPT2 model.")
+        logger.info(f"LoRA disabled. Training full {model_type} model.")
 
     # Seed
     pl.seed_everything(cfg.SEED_VALUE)
