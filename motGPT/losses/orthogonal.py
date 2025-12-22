@@ -38,8 +38,18 @@ def compute_motion_orthogonality_loss(
     if motion_embs.size(0) < 2:
         return torch.zeros((), device=device, dtype=embedding_weight.dtype)
 
+    # Check for zero or very small embeddings that could cause NaN after normalization
+    norms = motion_embs.norm(dim=-1)
+    if (norms < 1e-8).any():
+        # Some embeddings have near-zero norm, skip orthogonality loss to avoid NaN
+        return torch.zeros((), device=device, dtype=embedding_weight.dtype)
+
     # Normalize each embedding to unit length.
     motion_embs = F.normalize(motion_embs, p=2, dim=-1)  # (N, D)
+    
+    # Check for NaN after normalization (safety check)
+    if torch.isnan(motion_embs).any():
+        return torch.zeros((), device=device, dtype=embedding_weight.dtype)
 
     # Gram matrix of cosine similarities: G_ij = cos(e_i, e_j)
     gram = motion_embs @ motion_embs.t()  # (N, N)
@@ -52,6 +62,10 @@ def compute_motion_orthogonality_loss(
     # Normalize by N*(N-1) to make it scale invariant w.r.t. number of motion tokens.
     n = gram.size(0)
     loss = diff.pow(2).sum() / (n * (n - 1))
+    
+    # Final NaN check
+    if torch.isnan(loss):
+        return torch.zeros((), device=device, dtype=embedding_weight.dtype)
 
     return loss
 

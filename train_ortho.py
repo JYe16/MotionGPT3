@@ -588,6 +588,21 @@ def main():
     else:
         logger.info(f"LoRA disabled. Training full {model_type} model.")
 
+    # =====================================================
+    # NEW: Freeze non-motion token embeddings for non-GPT2 models
+    # This ensures only motion tokens are trained, preserving LLM's
+    # pre-trained text understanding capabilities
+    # =====================================================
+    if model_type != 'gpt2':
+        freeze_non_motion_embeddings(
+            model=model,
+            original_vocab_size=original_vocab_size,
+            model_type=model_type,
+            logger=logger
+        )
+    else:
+        logger.info("GPT2 model: Using LoRA's train_embeddings='motion_only' for gradient masking")
+
     # Seed
     pl.seed_everything(cfg.SEED_VALUE)
 

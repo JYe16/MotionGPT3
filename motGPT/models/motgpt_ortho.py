@@ -125,6 +125,16 @@ class MotGPTOrtho(BaseModel):
             embedding_weight = get_embedding_weight_from_model(self.lm.language_model)
             device = next(self.lm.language_model.parameters()).device
             loss = self.ortho_loss(embedding_weight, self.lm.tokenizer, device)
+            
+            # Debug: Check for NaN
+            if torch.isnan(loss):
+                print(f"[DEBUG] Orthogonality loss is NaN!")
+                print(f"[DEBUG] Embedding weight shape: {embedding_weight.shape}")
+                print(f"[DEBUG] Embedding weight dtype: {embedding_weight.dtype}")
+                print(f"[DEBUG] Embedding weight has NaN: {torch.isnan(embedding_weight).any()}")
+                print(f"[DEBUG] Embedding weight has Inf: {torch.isinf(embedding_weight).any()}")
+                return torch.zeros((), device=device, dtype=embedding_weight.dtype)
+            
             return loss
         except Exception as e:
             # Print the error for debugging
