@@ -211,21 +211,14 @@ class MotGPTOrtho(BaseModel):
             else:
                 raise
 
-        # Debug: Check if loss exists and print more info
-        if hasattr(outputs, 'loss'):
-            if outputs.loss is not None:
-                loss_val = outputs.loss
-                if torch.isnan(loss_val):
-                    # Debug NaN loss
-                    print(f"[DEBUG] NaN loss detected!")
-                    print(f"[DEBUG] logits has NaN: {torch.isnan(outputs.logits).any()}")
-                    print(f"[DEBUG] logits min/max: {outputs.logits.min():.4f} / {outputs.logits.max():.4f}")
-                else:
-                    print(f"[DEBUG] outputs.loss = {loss_val.item():.4f}")
-            else:
-                print(f"[DEBUG] outputs.loss is None!")
-        else:
-            print(f"[DEBUG] outputs has no 'loss' attribute! Type: {type(outputs)}")
+        # Debug code commented out
+        # if hasattr(outputs, 'loss'):
+        #     if outputs.loss is not None:
+        #         loss_val = outputs.loss
+        #         if torch.isnan(loss_val):
+        #             print(f"[DEBUG] NaN loss detected!")
+        #         else:
+        #             print(f"[DEBUG] outputs.loss = {loss_val.item():.4f}")
 
         return {'outputs': outputs}
 
