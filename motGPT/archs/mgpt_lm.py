@@ -227,10 +227,10 @@ class MLM(nn.Module):
                                 return_tensors="pt")
 
         labels_input_ids = inputs.input_ids.to(motion_tokens.device)
-        lables_attention_mask = inputs.attention_mask.to(motion_tokens.device)
+        labels_attention_mask = inputs.attention_mask.to(motion_tokens.device)
         outputs = self.language_model(input_ids=labels_input_ids,
-                                      attention_mask=lables_attention_mask,
-                                      labels=inputs["input_ids"])
+                                      attention_mask=labels_attention_mask,
+                                      labels=labels_input_ids)  # Use labels on correct device
 
         return outputs
 
