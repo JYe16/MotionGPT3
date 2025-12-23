@@ -76,7 +76,35 @@ class MLM(nn.Module):
             [f'<motion_id_{i}>' for i in range(self.m_codebook_size + 3)])
 
         if new_token_type == "insert":
+            old_vocab_size = self.language_model.get_input_embeddings().weight.shape[0]
             self.language_model.resize_token_embeddings(len(self.tokenizer))
+            
+            # Initialize new embeddings properly (avoid NaN in float16)
+            with torch.no_grad():
+                embed_layer = self.language_model.get_input_embeddings()
+                new_vocab_size = embed_layer.weight.shape[0]
+                if new_vocab_size > old_vocab_size:
+                    # Get mean and std from existing embeddings (in float32 for stability)
+                    existing_emb = embed_layer.weight[:old_vocab_size].float()
+                    mean_val = existing_emb.mean().item()
+                    std_val = existing_emb.std().item()
+                    
+                    # Initialize new tokens with similar distribution
+                    new_emb = torch.randn(
+                        new_vocab_size - old_vocab_size, 
+                        embed_layer.weight.shape[1],
+                        device=embed_layer.weight.device,
+                        dtype=torch.float32
+                    ) * std_val + mean_val
+                    
+                    # Convert to target dtype and assign
+                    embed_layer.weight[old_vocab_size:] = new_emb.to(embed_layer.weight.dtype)
+                    
+                    # Also handle lm_head if it exists and is separate
+                    lm_head = self.language_model.get_output_embeddings()
+                    if lm_head is not None and lm_head.weight is not embed_layer.weight:
+                        lm_head.weight[old_vocab_size:] = new_emb.to(lm_head.weight.dtype)
+                        
         elif new_token_type == "mlp":
             shared = NewTokenEmb(self.language_model.shared,
                                  self.m_codebook_size + 3)
