@@ -210,13 +210,16 @@ def initialize_motion_token_embeddings(model, codebook_weight: torch.Tensor,
             logger.info(f"  Motion token indices: {original_vocab_size} to {original_vocab_size + num_codes - 1}")
         
         # Create sparse projection to hidden_dim
+        # IMPORTANT: Do all computation in float32 to avoid numerical issues with float16
         projection_matrix = create_sparse_projection(
             input_dim=code_dim, 
             output_dim=hidden_dim,
             sparsity=0.9,
             seed=42
-        )
-        projected_codebook = codebook_weight @ projection_matrix
+        ).float()  # Ensure float32
+        
+        codebook_float = codebook_weight.float()  # Ensure float32
+        projected_codebook = codebook_float @ projection_matrix
         
         # Normalize to match existing embedding scale
         with torch.no_grad():
@@ -226,20 +229,38 @@ def initialize_motion_token_embeddings(model, codebook_weight: torch.Tensor,
             if logger:
                 logger.info(f"  Existing embedding norms: mean={mean_norm:.4f}")
             
+            # Normalize in float32
             projected_norms = projected_codebook.norm(dim=1, keepdim=True)
             projected_codebook = projected_codebook / (projected_norms + 1e-8) * mean_norm
+            
+            # Check for NaN/Inf before assignment
+            if torch.isnan(projected_codebook).any() or torch.isinf(projected_codebook).any():
+                if logger:
+                    logger.warning(f"  WARNING: projected_codebook has NaN/Inf! Using random init instead.")
+                # Fall back to random initialization
+                projected_codebook = torch.randn(num_codes, hidden_dim) * 0.02
             
             # Initialize motion tokens in shared embedding
             motion_start_idx = original_vocab_size
             motion_end_idx = original_vocab_size + num_codes
             
-            embedding_layer.weight[motion_start_idx:motion_end_idx] = projected_codebook.to(
-                embedding_layer.weight.device).to(embedding_layer.weight.dtype)
+            # Convert to target dtype at the very end
+            final_embeddings = projected_codebook.to(embedding_layer.weight.device).to(embedding_layer.weight.dtype)
+            
+            # Clamp to safe range for float16 (max ~65504)
+            if embedding_layer.weight.dtype == torch.float16:
+                final_embeddings = final_embeddings.clamp(-65000, 65000)
+            
+            embedding_layer.weight[motion_start_idx:motion_end_idx] = final_embeddings
+            
+            if logger:
+                logger.info(f"  Final embedding dtype: {final_embeddings.dtype}")
+                logger.info(f"  Final embedding has NaN: {torch.isnan(final_embeddings).any()}")
+                logger.info(f"  Final embedding has Inf: {torch.isinf(final_embeddings).any()}")
             
             # Also init lm_head if not tied
             if lm_head is not None and lm_head.weight is not embedding_layer.weight:
-                lm_head.weight[motion_start_idx:motion_end_idx] = projected_codebook.to(
-                    lm_head.weight.device).to(lm_head.weight.dtype)
+                lm_head.weight[motion_start_idx:motion_end_idx] = final_embeddings
         
         if logger:
             logger.info(f"  Initialized {num_codes} motion token embeddings")
