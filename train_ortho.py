@@ -116,103 +116,134 @@ def initialize_motion_token_embeddings(model, codebook_weight: torch.Tensor,
                                        model_type: str = "gpt2",
                                        logger=None):
     """
-    Initialize motion token embeddings in LLM using projected VQ-VAE codebook weights.
+    Initialize motion token embeddings using projected VQ-VAE codebook weights.
     
-    IMPORTANT: In MoT architecture, motion tokens have their own embedding layer
-    (motion_und_head) separate from text embeddings. This function initializes
-    the motion embedding layer (pre_processors[1]) with projected VQ-VAE codebook.
-    
-    Motion tokens:
-        - <motion_id_0> to <motion_id_511>: 512 codebook tokens
-        - <motion_id_512>, <motion_id_513>, <motion_id_514>: 3 special tokens (som, eom, mask, pad)
+    Supports two architectures:
+    1. MoT architecture (GPT2): Motion tokens have separate embedding layer (pre_processors[1])
+    2. Standard architecture (LLaMA): Motion tokens are appended to text vocab in shared embedding
     
     Args:
         model: The MotGPTOrtho model
         codebook_weight: Tensor of shape [512, 512] from VQ-VAE
-        original_vocab_size: Original vocab size (unused for motion embedding, kept for compatibility)
+        original_vocab_size: Original vocab size (50257 for GPT2, 128256 for LLaMA)
         model_type: "gpt2" or "llama"
         logger: Optional logger
     """
-    # Get the motion embedding layer from modality_infos
-    # In MoT architecture: pre_processors[0] = text embed, pre_processors[1] = motion embed
     lm = model.lm.language_model
+    num_codes, code_dim = codebook_weight.shape  # [512, 512]
     
-    # Access motion embedding layer (modality index 1)
-    if hasattr(lm, 'pre_processors') and len(lm.pre_processors) > 1:
+    # Check if this is MoT architecture (has pre_processors)
+    is_mot_architecture = hasattr(lm, 'pre_processors') and len(lm.pre_processors) > 1
+    
+    if is_mot_architecture:
+        # =====================================================
+        # MoT Architecture: Initialize pre_processors[1] (motion embedding)
+        # =====================================================
+        if logger:
+            logger.info(f"=" * 60)
+            logger.info(f"[MoT Architecture] Initializing motion embedding (pre_processors[1])")
+        
         motion_embedding_layer = lm.pre_processors[1]  # motion_und_head
         motion_lm_head = lm.post_processors[1]  # motion_gen_head
+        
+        motion_vocab_size, mot_embed_dim = motion_embedding_layer.weight.shape
+        
+        if logger:
+            logger.info(f"  Model type: {model_type}")
+            logger.info(f"  VQ-VAE Codebook: {num_codes} codes × {code_dim} dim")
+            logger.info(f"  Motion embedding: {motion_vocab_size} vocab × {mot_embed_dim} dim")
+        
+        # Create sparse projection to mot_embed_dim
+        projection_matrix = create_sparse_projection(
+            input_dim=code_dim, 
+            output_dim=mot_embed_dim,
+            sparsity=0.9,
+            seed=42
+        )
+        projected_codebook = codebook_weight @ projection_matrix
+        
+        # Normalize
+        with torch.no_grad():
+            target_std = 0.02
+            projected_norms = projected_codebook.norm(dim=1, keepdim=True)
+            projected_codebook = projected_codebook / (projected_norms + 1e-8) * (target_std * (mot_embed_dim ** 0.5))
+            
+            num_to_init = min(num_codes, motion_vocab_size)
+            motion_embedding_layer.weight[:num_to_init] = projected_codebook[:num_to_init].to(
+                motion_embedding_layer.weight.device).to(motion_embedding_layer.weight.dtype)
+            
+            if motion_lm_head is not None:
+                motion_lm_head.weight[:num_to_init] = projected_codebook[:num_to_init].to(
+                    motion_lm_head.weight.device).to(motion_lm_head.weight.dtype)
+        
+        if logger:
+            logger.info(f"  Initialized {num_to_init} motion embeddings")
+            logger.info(f"=" * 60)
     else:
+        # =====================================================
+        # Standard Architecture: Initialize text embedding layer at motion token indices
+        # Motion tokens are appended after original vocab
+        # =====================================================
         if logger:
-            logger.warning("Cannot find motion embedding layer (pre_processors[1])")
-            logger.warning("Motion embedding initialization skipped")
-        return
-    
-    # Get dimensions
-    num_codes, code_dim = codebook_weight.shape  # [512, 512]
-    motion_vocab_size, mot_embed_dim = motion_embedding_layer.weight.shape
-    
-    if logger:
-        logger.info(f"=" * 60)
-        logger.info(f"Initializing motion token embeddings from VQ-VAE codebook")
-        logger.info(f"  Model type: {model_type}")
-        logger.info(f"  VQ-VAE Codebook: {num_codes} codes × {code_dim} dim")
-        logger.info(f"  Motion embedding layer: {motion_vocab_size} vocab × {mot_embed_dim} hidden")
-    
-    # Create sparse projection: [512, mot_embed_dim]
-    projection_matrix = create_sparse_projection(
-        input_dim=code_dim, 
-        output_dim=mot_embed_dim,
-        sparsity=0.9,
-        seed=42
-    )
-    
-    if logger:
-        logger.info(f"  Sparse projection matrix: {projection_matrix.shape}")
-        nonzero_ratio = (projection_matrix != 0).float().mean().item()
-        logger.info(f"  Projection non-zero ratio: {nonzero_ratio:.2%}")
-    
-    # Project codebook to motion embedding dimension
-    projected_codebook = codebook_weight @ projection_matrix
-    
-    # Normalize projected embeddings
-    with torch.no_grad():
-        # Use random normal initialization scale as reference
-        # Motion embeddings are typically initialized with small random values
-        target_std = 0.02  # Standard initialization std for embeddings
+            logger.info(f"=" * 60)
+            logger.info(f"[Standard Architecture] Initializing motion tokens in shared embedding")
         
-        # Normalize projected codebook
-        projected_norms = projected_codebook.norm(dim=1, keepdim=True)
-        mean_norm = projected_norms.mean().item()
-        projected_codebook = projected_codebook / (projected_norms + 1e-8) * (target_std * (mot_embed_dim ** 0.5))
+        # Get the shared embedding layer
+        if model_type == "gpt2":
+            embedding_layer = lm.transformer.wte
+            lm_head = lm.lm_head if hasattr(lm, 'lm_head') else None
+        elif model_type == "llama":
+            embedding_layer = lm.model.embed_tokens
+            lm_head = lm.lm_head if hasattr(lm, 'lm_head') else None
+        else:
+            if logger:
+                logger.warning(f"Unknown model_type {model_type}")
+            return
+        
+        total_vocab_size, hidden_dim = embedding_layer.weight.shape
         
         if logger:
-            new_norms = projected_codebook.norm(dim=1)
-            logger.info(f"  Projected embedding norms: mean={new_norms.mean().item():.4f}, std={new_norms.std().item():.4f}")
-    
-    # Initialize motion token embeddings
-    # Motion vocab: 0..511 = codebook, 512..515 = special tokens (som, eom, mask, pad)
-    with torch.no_grad():
-        num_to_init = min(num_codes, motion_vocab_size)
+            logger.info(f"  Model type: {model_type}")
+            logger.info(f"  VQ-VAE Codebook: {num_codes} codes × {code_dim} dim")
+            logger.info(f"  Shared embedding: {total_vocab_size} vocab × {hidden_dim} hidden")
+            logger.info(f"  Original vocab size: {original_vocab_size}")
+            logger.info(f"  Motion token indices: {original_vocab_size} to {original_vocab_size + num_codes - 1}")
         
-        # Copy projected codebook to motion embedding layer
-        motion_embedding_layer.weight[:num_to_init] = projected_codebook[:num_to_init].to(
-            motion_embedding_layer.weight.device
-        ).to(motion_embedding_layer.weight.dtype)
+        # Create sparse projection to hidden_dim
+        projection_matrix = create_sparse_projection(
+            input_dim=code_dim, 
+            output_dim=hidden_dim,
+            sparsity=0.9,
+            seed=42
+        )
+        projected_codebook = codebook_weight @ projection_matrix
         
-        # Also initialize the motion LM head for better alignment
-        if motion_lm_head is not None:
-            # LM head maps from hidden to vocab, so we need transposed logic
-            # Initialize with similar projection
-            motion_lm_head.weight[:num_to_init] = projected_codebook[:num_to_init].to(
-                motion_lm_head.weight.device
-            ).to(motion_lm_head.weight.dtype)
-    
-    if logger:
-        logger.info(f"  Successfully initialized {num_to_init} motion token embeddings")
-        special_tokens = motion_vocab_size - num_codes
-        if special_tokens > 0:
-            logger.info(f"  ({special_tokens} special tokens remain randomly initialized)")
-        logger.info(f"=" * 60)
+        # Normalize to match existing embedding scale
+        with torch.no_grad():
+            existing_norms = embedding_layer.weight[:original_vocab_size].float().norm(dim=1)
+            mean_norm = existing_norms.mean().item()
+            
+            if logger:
+                logger.info(f"  Existing embedding norms: mean={mean_norm:.4f}")
+            
+            projected_norms = projected_codebook.norm(dim=1, keepdim=True)
+            projected_codebook = projected_codebook / (projected_norms + 1e-8) * mean_norm
+            
+            # Initialize motion tokens in shared embedding
+            motion_start_idx = original_vocab_size
+            motion_end_idx = original_vocab_size + num_codes
+            
+            embedding_layer.weight[motion_start_idx:motion_end_idx] = projected_codebook.to(
+                embedding_layer.weight.device).to(embedding_layer.weight.dtype)
+            
+            # Also init lm_head if not tied
+            if lm_head is not None and lm_head.weight is not embedding_layer.weight:
+                lm_head.weight[motion_start_idx:motion_end_idx] = projected_codebook.to(
+                    lm_head.weight.device).to(lm_head.weight.dtype)
+        
+        if logger:
+            logger.info(f"  Initialized {num_codes} motion token embeddings")
+            logger.info(f"=" * 60)
 
 
 def apply_lora_to_llm(model, lora_config: dict, original_vocab_size: int = 50257, 
@@ -401,99 +432,103 @@ def apply_lora_to_gpt2(model, lora_config: dict, original_vocab_size: int = 5025
 
 def freeze_non_motion_embeddings(model, original_vocab_size: int, model_type: str, logger=None):
     """
-    Freeze the TEXT embedding weights for the original vocabulary.
+    Freeze the non-motion token embeddings.
     
-    In MoT architecture:
-    - pre_processors[0] = text embedding (model.embed_tokens / model.transformer.wte)
-    - pre_processors[1] = motion embedding (independent layer, always trainable)
-    
-    This function freezes the TEXT embedding layer to preserve pre-trained knowledge.
-    Motion embedding (pre_processors[1]) is NOT affected and remains fully trainable.
+    For MoT architecture (GPT2): Freeze text embedding (pre_processors[0])
+    For Standard architecture (LLaMA): Freeze original vocab in shared embedding using gradient hook
     
     Args:
         model: The MotGPTOrtho model (possibly with LoRA wrapper)
-        original_vocab_size: Original vocab size before adding special tokens
+        original_vocab_size: Original vocab size before adding motion tokens
         model_type: "gpt2" or "llama"
         logger: Optional logger
     """
-    if logger:
-        logger.info(f"=" * 60)
-        logger.info(f"Freezing TEXT embedding for {model_type.upper()}")
-        logger.info(f"  (Motion embedding pre_processors[1] remains trainable)")
-    
-    # Get the language model (possibly PEFT wrapped)
     llm = model.lm.language_model
     
-    # Navigate through PEFT wrapper if present
+    # Navigate through PEFT wrapper
     if hasattr(llm, 'base_model') and hasattr(llm.base_model, 'model'):
         base_model = llm.base_model.model
     else:
         base_model = llm
     
-    # Get text embedding layer (pre_processors[0])
-    if hasattr(base_model, 'pre_processors') and len(base_model.pre_processors) > 0:
-        text_embed_layer = base_model.pre_processors[0]
+    # Check if MoT architecture
+    is_mot_architecture = hasattr(base_model, 'pre_processors') and len(base_model.pre_processors) > 1
+    
+    if is_mot_architecture:
+        # =====================================================
+        # MoT Architecture: Freeze text embedding (pre_processors[0])
+        # Motion embedding (pre_processors[1]) remains trainable
+        # =====================================================
+        if logger:
+            logger.info(f"=" * 60)
+            logger.info(f"[MoT] Freezing text embedding (pre_processors[0])")
+        
+        text_embed = base_model.pre_processors[0]
         text_lm_head = base_model.post_processors[0] if hasattr(base_model, 'post_processors') else None
-    else:
-        # Fallback to direct access
-        if model_type == "gpt2":
-            text_embed_layer = base_model.transformer.wte
-            text_lm_head = base_model.lm_head if hasattr(base_model, 'lm_head') else None
-        elif model_type == "llama":
-            text_embed_layer = base_model.model.embed_tokens
-            text_lm_head = base_model.lm_head if hasattr(base_model, 'lm_head') else None
-        else:
-            if logger:
-                logger.warning(f"Unknown model_type {model_type}, skipping embedding freeze")
-            return
-    
-    total_vocab_size = text_embed_layer.weight.shape[0]
-    hidden_dim = text_embed_layer.weight.shape[1]
-    num_special_tokens = total_vocab_size - original_vocab_size
-    
-    if logger:
-        logger.info(f"  Text vocab size: {total_vocab_size}")
-        logger.info(f"  Original vocab (frozen): {original_vocab_size}")
-        logger.info(f"  Added special tokens: {num_special_tokens}")
-        logger.info(f"  Hidden dim: {hidden_dim}")
-    
-    # Freeze entire text embedding layer
-    # In MoT architecture, we typically don't need to update text embeddings at all
-    text_embed_layer.weight.requires_grad = False
-    
-    if logger:
-        logger.info(f"  Froze text embedding layer (pre_processors[0])")
-    
-    # Also freeze text lm_head if it exists and is separate
-    if text_lm_head is not None:
-        if text_lm_head.weight is text_embed_layer.weight:
-            if logger:
-                logger.info(f"  Text lm_head weights are tied with embed_tokens")
-        else:
+        
+        # Freeze text embedding
+        text_embed.weight.requires_grad = False
+        if text_lm_head is not None and text_lm_head.weight is not text_embed.weight:
             text_lm_head.weight.requires_grad = False
-            if logger:
-                logger.info(f"  Froze text lm_head layer (post_processors[0])")
-    
-    # Verify motion embedding is trainable
-    if hasattr(base_model, 'pre_processors') and len(base_model.pre_processors) > 1:
-        motion_embed = base_model.pre_processors[1]
-        motion_lm_head = base_model.post_processors[1] if len(base_model.post_processors) > 1 else None
         
         # Ensure motion embedding is trainable
+        motion_embed = base_model.pre_processors[1]
+        motion_lm_head = base_model.post_processors[1] if len(base_model.post_processors) > 1 else None
         motion_embed.weight.requires_grad = True
         if motion_lm_head is not None:
             motion_lm_head.weight.requires_grad = True
         
-        motion_params = motion_embed.weight.numel()
-        if motion_lm_head is not None:
-            motion_params += motion_lm_head.weight.numel()
+        if logger:
+            logger.info(f"  Text embedding frozen: {text_embed.weight.shape}")
+            logger.info(f"  Motion embedding trainable: {motion_embed.weight.shape}")
+            logger.info(f"=" * 60)
+    else:
+        # =====================================================
+        # Standard Architecture: Use gradient hook to freeze original vocab
+        # =====================================================
+        if logger:
+            logger.info(f"=" * 60)
+            logger.info(f"[Standard] Freezing original vocab in shared embedding")
+        
+        # Get shared embedding layer
+        if model_type == "gpt2":
+            embed_layer = base_model.transformer.wte
+            lm_head = base_model.lm_head if hasattr(base_model, 'lm_head') else None
+        elif model_type == "llama":
+            embed_layer = base_model.model.embed_tokens
+            lm_head = base_model.lm_head if hasattr(base_model, 'lm_head') else None
+        else:
+            if logger:
+                logger.warning(f"Unknown model_type {model_type}")
+            return
+        
+        total_vocab_size = embed_layer.weight.shape[0]
+        hidden_dim = embed_layer.weight.shape[1]
+        num_motion_tokens = total_vocab_size - original_vocab_size
         
         if logger:
-            logger.info(f"  Motion embedding (pre_processors[1]): {motion_embed.weight.shape[0]} vocab × {motion_embed.weight.shape[1]} dim")
-            logger.info(f"  Motion embedding trainable params: {motion_params:,}")
-    
-    if logger:
-        logger.info(f"=" * 60)
+            logger.info(f"  Total vocab: {total_vocab_size}")
+            logger.info(f"  Original vocab (frozen): {original_vocab_size}")
+            logger.info(f"  Motion tokens (trainable): {num_motion_tokens}")
+        
+        # Gradient hook to zero out gradients for original vocabulary
+        def create_freeze_hook(frozen_size):
+            def hook(grad):
+                mask = torch.ones_like(grad)
+                mask[:frozen_size] = 0
+                return grad * mask
+            return hook
+        
+        embed_layer.weight.requires_grad = True
+        embed_layer.weight.register_hook(create_freeze_hook(original_vocab_size))
+        
+        if lm_head is not None and lm_head.weight is not embed_layer.weight:
+            lm_head.weight.requires_grad = True
+            lm_head.weight.register_hook(create_freeze_hook(original_vocab_size))
+        
+        if logger:
+            logger.info(f"  Registered gradient hook to freeze first {original_vocab_size} tokens")
+            logger.info(f"=" * 60)
 
 
 def main():
@@ -589,19 +624,16 @@ def main():
         logger.info(f"LoRA disabled. Training full {model_type} model.")
 
     # =====================================================
-    # NEW: Freeze non-motion token embeddings for non-GPT2 models
-    # This ensures only motion tokens are trained, preserving LLM's
-    # pre-trained text understanding capabilities
+    # NEW: Freeze non-motion token embeddings
+    # - MoT architecture (GPT2): Freeze text embedding entirely
+    # - Standard architecture (LLaMA): Freeze original vocab via gradient hook
     # =====================================================
-    if model_type != 'gpt2':
-        freeze_non_motion_embeddings(
-            model=model,
-            original_vocab_size=original_vocab_size,
-            model_type=model_type,
-            logger=logger
-        )
-    else:
-        logger.info("GPT2 model: Using LoRA's train_embeddings='motion_only' for gradient masking")
+    freeze_non_motion_embeddings(
+        model=model,
+        original_vocab_size=original_vocab_size,
+        model_type=model_type,
+        logger=logger
+    )
 
     # Seed
     pl.seed_everything(cfg.SEED_VALUE)
