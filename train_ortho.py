@@ -659,6 +659,17 @@ def main():
     # Seed
     pl.seed_everything(cfg.SEED_VALUE)
 
+    # Determine precision based on model type
+    model_type = cfg.model.params.lm.params.get('model_type', 'gpt2')
+    if model_type == 'llama':
+        # Use mixed precision for LLaMA to avoid NaN during training
+        # "16-mixed" uses float32 for accumulation, float16 for compute
+        train_precision = "16-mixed"
+        gradient_clip = 1.0  # Clip gradients to prevent explosion
+    else:
+        train_precision = 32
+        gradient_clip = None
+
     # Lightning Trainer
     trainer = pl.Trainer(
         default_root_dir=cfg.FOLDER_EXP,
@@ -674,8 +685,10 @@ def main():
         benchmark=False,
         deterministic=False,
         accumulate_grad_batches=cfg.TRAIN.accumulate_grad_batches,
+        precision=train_precision,
+        gradient_clip_val=gradient_clip,
     )
-    logger.info("Trainer initialized")
+    logger.info(f"Trainer initialized with precision={train_precision}, gradient_clip={gradient_clip}")
 
     # Strict load pretrained model
     if cfg.TRAIN.PRETRAINED:
