@@ -228,6 +228,15 @@ class MLM(nn.Module):
 
         labels_input_ids = inputs.input_ids.to(motion_tokens.device)
         labels_attention_mask = inputs.attention_mask.to(motion_tokens.device)
+        
+        # Debug: Check for NaN before forward
+        embed_layer = self.language_model.model.embed_tokens if hasattr(self.language_model, 'model') else self.language_model.transformer.wte
+        print(f"[DEBUG forward_dec] input_ids shape: {labels_input_ids.shape}")
+        print(f"[DEBUG forward_dec] input_ids max: {labels_input_ids.max()}, min: {labels_input_ids.min()}")
+        print(f"[DEBUG forward_dec] embedding weight dtype: {embed_layer.weight.dtype}")
+        print(f"[DEBUG forward_dec] embedding weight has NaN: {torch.isnan(embed_layer.weight).any()}")
+        print(f"[DEBUG forward_dec] embedding weight has Inf: {torch.isinf(embed_layer.weight).any()}")
+        
         outputs = self.language_model(input_ids=labels_input_ids,
                                       attention_mask=labels_attention_mask,
                                       labels=labels_input_ids)  # Use labels on correct device
