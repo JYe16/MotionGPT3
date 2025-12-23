@@ -60,7 +60,7 @@ class MLM(nn.Module):
         elif model_type == "llama":
             self.language_model = LlamaForCausalLM.from_pretrained(
                 model_path, 
-                torch_dtype=torch.float16,  # Use float16 instead of bfloat16 for better CUDA compatibility
+                torch_dtype=torch.float32,  # Use float32 for training stability
                 low_cpu_mem_usage=True
             )
             self.lm_type = 'dec'

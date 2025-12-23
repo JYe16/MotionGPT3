@@ -662,9 +662,8 @@ def main():
     # Determine precision based on model type
     model_type = cfg.model.params.lm.params.get('model_type', 'gpt2')
     if model_type == 'llama':
-        # Use mixed precision for LLaMA to avoid NaN during training
-        # "16-mixed" uses float32 for accumulation, float16 for compute
-        train_precision = "16-mixed"
+        # Use float32 with gradient clipping for LLaMA training stability
+        train_precision = 32
         gradient_clip = 1.0  # Clip gradients to prevent explosion
     else:
         train_precision = 32
