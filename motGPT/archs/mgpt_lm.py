@@ -230,12 +230,34 @@ class MLM(nn.Module):
         labels_attention_mask = inputs.attention_mask.to(motion_tokens.device)
         
         # Debug: Check for NaN before forward
-        embed_layer = self.language_model.model.embed_tokens if hasattr(self.language_model, 'model') else self.language_model.transformer.wte
-        print(f"[DEBUG forward_dec] input_ids shape: {labels_input_ids.shape}")
-        print(f"[DEBUG forward_dec] input_ids max: {labels_input_ids.max()}, min: {labels_input_ids.min()}")
-        print(f"[DEBUG forward_dec] embedding weight dtype: {embed_layer.weight.dtype}")
-        print(f"[DEBUG forward_dec] embedding weight has NaN: {torch.isnan(embed_layer.weight).any()}")
-        print(f"[DEBUG forward_dec] embedding weight has Inf: {torch.isinf(embed_layer.weight).any()}")
+        # Handle PEFT wrapped models and different model architectures
+        base_model = self.language_model
+        # Unwrap PEFT model if present
+        if hasattr(base_model, 'base_model'):
+            base_model = base_model.base_model
+        if hasattr(base_model, 'model'):  # PEFT has another 'model' layer
+            base_model = base_model.model
+        
+        # Now get embed_tokens from the correct location
+        if hasattr(base_model, 'model') and hasattr(base_model.model, 'embed_tokens'):
+            # LlamaForCausalLM: model.model.embed_tokens
+            embed_layer = base_model.model.embed_tokens
+        elif hasattr(base_model, 'embed_tokens'):
+            # Direct embed_tokens
+            embed_layer = base_model.embed_tokens
+        elif hasattr(base_model, 'transformer') and hasattr(base_model.transformer, 'wte'):
+            # GPT2: transformer.wte
+            embed_layer = base_model.transformer.wte
+        else:
+            print(f"[DEBUG] Cannot find embed_layer, model structure: {type(base_model)}")
+            embed_layer = None
+        
+        if embed_layer is not None:
+            print(f"[DEBUG forward_dec] input_ids shape: {labels_input_ids.shape}")
+            print(f"[DEBUG forward_dec] input_ids max: {labels_input_ids.max()}, min: {labels_input_ids.min()}")
+            print(f"[DEBUG forward_dec] embedding weight dtype: {embed_layer.weight.dtype}")
+            print(f"[DEBUG forward_dec] embedding weight has NaN: {torch.isnan(embed_layer.weight).any()}")
+            print(f"[DEBUG forward_dec] embedding weight has Inf: {torch.isinf(embed_layer.weight).any()}")
         
         outputs = self.language_model(input_ids=labels_input_ids,
                                       attention_mask=labels_attention_mask,
