@@ -284,6 +284,13 @@ class MLM(nn.Module):
             print(f"[DEBUG forward_dec] input_ids shape: {labels_input_ids.shape}")
             print(f"[DEBUG forward_dec] input_ids max: {labels_input_ids.max()}, min: {labels_input_ids.min()}")
             print(f"[DEBUG forward_dec] embedding weight dtype: {embed_layer.weight.dtype}")
+            
+            # Check which part has NaN
+            original_vocab = 128256  # LLaMA original vocab
+            orig_has_nan = torch.isnan(embed_layer.weight[:original_vocab]).any()
+            new_has_nan = torch.isnan(embed_layer.weight[original_vocab:]).any() if embed_layer.weight.shape[0] > original_vocab else False
+            print(f"[DEBUG forward_dec] Original vocab ({original_vocab}) has NaN: {orig_has_nan}")
+            print(f"[DEBUG forward_dec] New motion tokens has NaN: {new_has_nan}")
             print(f"[DEBUG forward_dec] embedding weight has NaN: {torch.isnan(embed_layer.weight).any()}")
             print(f"[DEBUG forward_dec] embedding weight has Inf: {torch.isinf(embed_layer.weight).any()}")
         
