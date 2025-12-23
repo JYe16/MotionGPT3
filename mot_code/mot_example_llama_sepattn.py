@@ -257,40 +257,36 @@ class MoTLlamaForCausalLM(LlamaForCausalLM):
         
         # Get logits for each modality
         if isinstance(hidden_states, list):
-            # Multi-modality output
-            logits_list = []
-            for i, hid in enumerate(hidden_states):
-                logits_list.append(self.post_processors[i](hid))
-            
-            # Merge logits based on type_ids
-            batch_size, seq_len = hidden_states[0].shape[:2]
-            vocab_size = max(l.shape[-1] for l in logits_list)
-            logits = torch.zeros(batch_size, seq_len, vocab_size, 
-                               device=hidden_states[0].device, dtype=hidden_states[0].dtype)
-            
-            for i, mod_val_pos in enumerate(self.valid_pos):
-                logits[mod_val_pos] = logits_list[i][mod_val_pos]
+            # Multi-modality output - compute logits per modality like GPT2
+            lm_logits = [self.post_processors[i](hid) for i, hid in enumerate(hidden_states)]
         else:
-            logits = self.lm_head(hidden_states)
+            # Single hidden state - just use lm_head
+            lm_logits = [self.lm_head(hidden_states)]
         
-        loss = None
+        # Compute loss using modality-specific loss functions (like GPT2 version)
+        total_loss = None
         if labels is not None:
-            # Shift for next-token prediction
-            shift_logits = logits[..., :-1, :].contiguous()
-            shift_labels = labels[..., 1:].contiguous()
-            loss_fct = nn.CrossEntropyLoss()
-            shift_logits = shift_logits.view(-1, shift_logits.size(-1))
-            shift_labels = shift_labels.view(-1)
-            shift_labels = shift_labels.to(shift_logits.device)
-            loss = loss_fct(shift_logits, shift_labels)
+            total_loss = 0.
+            if not isinstance(labels, list):
+                mlabels = [labels] * self.modality_num
+            else:
+                mlabels = labels
+                
+            for i, out_logit in enumerate(lm_logits):
+                if i >= len(self.valid_pos) or self.valid_pos[i].sum() == 0:
+                    continue
+                mlabel = mlabels[i].to(out_logit.device)
+                loss_fct = self.modality_infos[i].loss_fct
+                loss_mod = loss_fct(out_logit, mlabel, self.valid_pos[i])
+                total_loss = total_loss + loss_mod.nan_to_num_(0)
             
         if not return_dict:
-            output = (logits,) + outputs[1:]
-            return (loss,) + output if loss is not None else output
+            output = (lm_logits,) + outputs[1:]
+            return (total_loss,) + output if total_loss is not None else output
             
         return CausalLMOutputWithPast(
-            loss=loss,
-            logits=logits,
+            loss=total_loss,
+            logits=lm_logits,
             past_key_values=outputs.past_key_values if hasattr(outputs, 'past_key_values') else None,
             hidden_states=outputs.hidden_states if hasattr(outputs, 'hidden_states') else None,
             attentions=outputs.attentions if hasattr(outputs, 'attentions') else None,

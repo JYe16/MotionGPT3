@@ -76,12 +76,16 @@ class MotionOrthogonalityLoss(nn.Module):
     
     This can be used as a regularization term during training to encourage
     motion token embeddings to be orthogonal to each other.
+    
+    NOTE: In MoT architecture, motion tokens have their own embedding layer
+    (motion_und_head with vocab size = motion_codebook_size + special tokens).
+    The indices in this embedding are 0..511 for codebook tokens.
     """
     
     def __init__(self, motion_codebook_size: int = 512, lambda_ortho: float = 0.1):
         """
         Args:
-            motion_codebook_size: Number of motion tokens in the vocabulary.
+            motion_codebook_size: Number of motion tokens in the codebook (typically 512).
             lambda_ortho: Weight for the orthogonality loss term.
         """
         super().__init__()
@@ -89,29 +93,23 @@ class MotionOrthogonalityLoss(nn.Module):
         self.lambda_ortho = lambda_ortho
         self._motion_ids = None
     
-    def get_motion_token_ids(self, tokenizer) -> torch.Tensor:
+    def get_motion_token_ids(self, tokenizer=None) -> torch.Tensor:
         """
-        Get the token IDs for all motion tokens from the tokenizer.
+        Get the token IDs for all motion codebook tokens.
+        
+        In MoT architecture, motion embedding layer has indices:
+        - 0..511: codebook tokens
+        - 512+: special tokens (som, eom, mask, pad)
         
         Args:
-            tokenizer: The tokenizer containing motion tokens.
+            tokenizer: Unused, kept for API compatibility.
             
         Returns:
-            Tensor of motion token IDs.
+            Tensor of motion token IDs (0 to motion_codebook_size-1).
         """
         if self._motion_ids is None:
-            motion_ids = []
-            # Motion tokens are named '<motion_id_0>', '<motion_id_1>', etc.
-            for i in range(self.motion_codebook_size):
-                token_name = f'<motion_id_{i}>'
-                token_id = tokenizer.convert_tokens_to_ids(token_name)
-                if token_id != tokenizer.unk_token_id:
-                    motion_ids.append(token_id)
-            
-            if len(motion_ids) > 0:
-                self._motion_ids = torch.tensor(motion_ids, dtype=torch.long)
-            else:
-                self._motion_ids = None
+            # Motion embedding indices are simply 0..motion_codebook_size-1
+            self._motion_ids = torch.arange(self.motion_codebook_size, dtype=torch.long)
                 
         return self._motion_ids
     
@@ -125,8 +123,8 @@ class MotionOrthogonalityLoss(nn.Module):
         Compute the weighted orthogonality loss.
         
         Args:
-            embedding_weight: The embedding weight matrix from the model.
-            tokenizer: The tokenizer to get motion token IDs.
+            embedding_weight: The motion embedding weight matrix from the model.
+            tokenizer: Unused, kept for API compatibility.
             device: The device to compute on.
             
         Returns:
@@ -139,43 +137,36 @@ class MotionOrthogonalityLoss(nn.Module):
 
 def get_embedding_weight_from_model(model) -> torch.Tensor:
     """
-    Extract the embedding weight matrix from different model architectures.
+    Extract the MOTION embedding weight matrix from MoT model architectures.
+    
+    In MoT architecture, motion tokens have their own embedding layer
+    (pre_processors[1] / motion_und_head) separate from text embeddings.
+    This function returns the motion embedding weights for orthogonality loss.
     
     Args:
-        model: The language model (GPT2, T5, LLaMA, etc.), possibly wrapped by PEFT/LoRA
+        model: The language model (MoTGPT2LMHeadModel, MoTLlamaForCausalLM, etc.), 
+               possibly wrapped by PEFT/LoRA
         
     Returns:
-        The embedding weight tensor.
+        The motion embedding weight tensor.
     """
-    # For PEFT-wrapped models (LoRA)
+    # Navigate through PEFT wrapper if present
     if hasattr(model, 'base_model') and hasattr(model.base_model, 'model'):
         base_model = model.base_model.model
-        # GPT2
-        if hasattr(base_model, 'transformer') and hasattr(base_model.transformer, 'wte'):
-            return base_model.transformer.wte.weight
-        # LLaMA (PEFT wrapped)
-        if hasattr(base_model, 'model') and hasattr(base_model.model, 'embed_tokens'):
-            return base_model.model.embed_tokens.weight
-        # T5
-        if hasattr(base_model, 'shared'):
-            return base_model.shared.weight
+    else:
+        base_model = model
     
-    # For GPT2LMHeadModel (non-wrapped)
-    if hasattr(model, 'transformer') and hasattr(model.transformer, 'wte'):
-        return model.transformer.wte.weight
+    # MoT models have pre_processors where index 1 is motion embedding
+    if hasattr(base_model, 'pre_processors') and len(base_model.pre_processors) > 1:
+        motion_embedding = base_model.pre_processors[1]  # motion_und_head
+        if hasattr(motion_embedding, 'weight'):
+            return motion_embedding.weight
     
-    # For LLaMA/MoTLlama (non-wrapped) - model.model.embed_tokens
-    if hasattr(model, 'model') and hasattr(model.model, 'embed_tokens'):
-        return model.model.embed_tokens.weight
+    # Fallback: Try to get motion embedding from modality_infos
+    if hasattr(base_model, 'modality_infos') and len(base_model.modality_infos) > 1:
+        motion_info = base_model.modality_infos[1]
+        if hasattr(motion_info, 'pre_processor') and hasattr(motion_info.pre_processor, 'weight'):
+            return motion_info.pre_processor.weight
     
-    # For T5
-    if hasattr(model, 'shared'):
-        return model.shared.weight
-    
-    # For models with get_input_embeddings (fallback)
-    if hasattr(model, 'get_input_embeddings'):
-        emb = model.get_input_embeddings()
-        if emb is not None and hasattr(emb, 'weight'):
-            return emb.weight
-    
-    raise ValueError("Cannot find embedding weight in model")
+    raise ValueError("Cannot find motion embedding weight in model. "
+                    "Make sure the model has pre_processors[1] (motion_und_head)")
