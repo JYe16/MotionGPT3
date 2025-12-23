@@ -211,6 +211,15 @@ class MotGPTOrtho(BaseModel):
             else:
                 raise
 
+        # Debug: Check if loss exists
+        if hasattr(outputs, 'loss'):
+            if outputs.loss is not None:
+                print(f"[DEBUG] outputs.loss = {outputs.loss.item():.4f}")
+            else:
+                print(f"[DEBUG] outputs.loss is None!")
+        else:
+            print(f"[DEBUG] outputs has no 'loss' attribute! Type: {type(outputs)}")
+
         return {'outputs': outputs}
 
     @torch.no_grad()
