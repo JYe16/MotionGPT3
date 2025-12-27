@@ -1,0 +1,101 @@
+# M2T Training with Qwen3-0.6B
+# This config uses Qwen3-0.6B as the language model backbone
+# Key features: 
+#   - Small but capable model (0.6B params)
+#   - Hidden size: 1024, 28 layers
+#   - Vocab size: 151936
+
+NAME: M2T_Qwen3_0.6B_Ortho_CodebookInit
+ACCELERATOR: 'gpu'
+DEVICE: [0]
+NUM_NODES: 1
+
+# Path to VQ-VAE codebook for motion token embedding initialization
+CODEBOOK_PATH: checkpoints/codebook_st_share.pt
+
+# =====================================================
+# LoRA Configuration for Parameter-Efficient Training
+# =====================================================
+LORA:
+  ENABLED: true
+  r: 16                      # LoRA rank
+  lora_alpha: 32             # LoRA scaling factor (typical: 2x rank)
+  lora_dropout: 0.05         # Dropout for LoRA layers
+  # train_embeddings options:
+  #   - 'motion_only': Only train motion token embeddings (indices 151936+), most efficient
+  #   - 'all': Train entire embedding layer (embed_tokens + lm_head)
+  #   - false: Don't train any embeddings, only LoRA params
+  train_embeddings: 'motion_only'
+  # Target modules for Qwen: q_proj, k_proj, v_proj, o_proj (attention projections)
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+
+TEST:
+  CHECKPOINTS: null
+  SPLIT: test
+  BATCH_SIZE: 32
+  REPLICATIONS: 1
+
+TRAIN:
+  STAGE: token_custom
+  instruction_type: m2t
+  BATCH_SIZE: 16             # Moderate batch size for 0.6B model
+  END_EPOCH: 100
+  LR_SCHEDULER:
+    target: CosineAnnealingLR
+    params:
+      T_max: 200
+      eta_min: 1e-6
+  OPTIM:
+    target: AdamW
+    params:
+      lr: 5e-5               # Lower LR for stability
+      weight_decay: 0.01
+
+DATASET:
+  target: motGPT.data.HumanML3D_custom.HumanML3DDataModuleCustom
+  CODE_PATH: motion_tokens_st_share
+  HUMANML3D:
+    ROOT: /home/jackieye/code/llm-sensing/data/humanml3d_263/
+    FPS: 20
+    MIN_MOTION_LEN: 20
+    MAX_MOTION_LEN: 200
+
+model:
+  target: motGPT.models.motgpt_ortho.MotGPTOrtho
+  params:
+    condition: 'motion'
+    task: 'm2t'
+    lambda_ortho: 0.01
+    lm:
+      target: motGPT.archs.mgpt_lm.MLM
+      params:
+        model_type: qwen           # Use Qwen instead of GPT2
+        model_path: deps/Qwen3-0.6B
+        stage: ${TRAIN.STAGE}
+        ablation: ${ABLATION}
+        motion_codebook_size: 512
+        vocab_size: 512
+    motion_vae:
+      target: motGPT.archs.mld_vae.MldVae
+      params:
+        code_num: 512
+        code_dim: 512
+        nfeats: ${DATASET.NFEATS}
+        ablation: ${ABLATION}
+        datatype: ${DATASET.target}
+        
+LOSS:
+  LAMBDA_CLS: 1.0
+
+METRIC:
+  TASK: 'm2t'
+  TYPE: []
+  # TYPE: ['M2TMetrics']
+
+LOGGER:
+  TYPE: ['tensorboard']
+  VAL_EVERY_STEPS: 1

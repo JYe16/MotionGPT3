@@ -195,6 +195,9 @@ def initialize_motion_token_embeddings(model, codebook_weight: torch.Tensor,
         elif model_type == "llama":
             embedding_layer = lm.model.embed_tokens
             lm_head = lm.lm_head if hasattr(lm, 'lm_head') else None
+        elif model_type == "qwen":
+            embedding_layer = lm.model.embed_tokens
+            lm_head = lm.lm_head if hasattr(lm, 'lm_head') else None
         else:
             if logger:
                 logger.warning(f"Unknown model_type {model_type}")
@@ -304,6 +307,8 @@ def apply_lora_to_llm(model, lora_config: dict, original_vocab_size: int = 50257
         default_target_modules = ['c_attn', 'c_proj']
     elif model_type == "llama":
         default_target_modules = ['q_proj', 'k_proj', 'v_proj', 'o_proj']
+    elif model_type == "qwen":
+        default_target_modules = ['q_proj', 'k_proj', 'v_proj', 'o_proj']
     else:
         default_target_modules = ['c_attn', 'c_proj']
     
@@ -329,7 +334,7 @@ def apply_lora_to_llm(model, lora_config: dict, original_vocab_size: int = 50257
     if train_embeddings == 'all':
         if model_type == "gpt2":
             modules_to_save = ['wte', 'lm_head']
-        elif model_type == "llama":
+        elif model_type in ["llama", "qwen"]:
             modules_to_save = ['embed_tokens', 'lm_head']
     
     peft_config = LoraConfig(
@@ -359,7 +364,7 @@ def apply_lora_to_llm(model, lora_config: dict, original_vocab_size: int = 50257
         if model_type == "gpt2":
             wte = base_model.transformer.wte
             lm_head = base_model.lm_head
-        elif model_type == "llama":
+        elif model_type in ["llama", "qwen"]:
             wte = base_model.model.embed_tokens
             lm_head = base_model.lm_head
         else:
@@ -413,7 +418,7 @@ def apply_lora_to_llm(model, lora_config: dict, original_vocab_size: int = 50257
             if model_type == "gpt2":
                 wte = base_model.transformer.wte
                 lm_head = base_model.lm_head
-            elif model_type == "llama":
+            elif model_type in ["llama", "qwen"]:
                 wte = base_model.model.embed_tokens
                 lm_head = base_model.lm_head
             else:
@@ -515,7 +520,7 @@ def freeze_non_motion_embeddings(model, original_vocab_size: int, model_type: st
         if model_type == "gpt2":
             embed_layer = base_model.transformer.wte
             lm_head = base_model.lm_head if hasattr(base_model, 'lm_head') else None
-        elif model_type == "llama":
+        elif model_type in ["llama", "qwen"]:
             embed_layer = base_model.model.embed_tokens
             lm_head = base_model.lm_head if hasattr(base_model, 'lm_head') else None
         else:
@@ -606,6 +611,8 @@ def main():
         original_vocab_size = 50257
     elif model_type == 'llama':
         original_vocab_size = 128256  # LLaMA 3.2 vocab size
+    elif model_type == 'qwen':
+        original_vocab_size = 151936  # Qwen3 vocab size
     else:
         original_vocab_size = 50257  # Default to GPT2
         
@@ -661,8 +668,8 @@ def main():
 
     # Determine precision based on model type
     model_type = cfg.model.params.lm.params.get('model_type', 'gpt2')
-    if model_type == 'llama':
-        # Use float32 with gradient clipping for LLaMA training stability
+    if model_type in ['llama', 'qwen']:
+        # Use float32 with gradient clipping for LLaMA/Qwen training stability
         train_precision = 32
         gradient_clip = 1.0  # Clip gradients to prevent explosion
     else:
