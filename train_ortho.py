@@ -25,6 +25,22 @@ import os
 os.environ["TORCH_FORCE_WEIGHTS_ONLY_LOAD"] = "0"
 
 import torch
+
+# Fix for PyTorch 2.6+ checkpoint loading with OmegaConf
+# Add safe globals for checkpoint deserialization
+try:
+    from omegaconf import ListConfig, DictConfig
+    torch.serialization.add_safe_globals([ListConfig, DictConfig])
+except Exception:
+    pass
+
+# Monkey-patch torch.load to use weights_only=False by default
+_original_torch_load = torch.load
+def _patched_torch_load(*args, **kwargs):
+    if 'weights_only' not in kwargs:
+        kwargs['weights_only'] = False
+    return _original_torch_load(*args, **kwargs)
+torch.load = _patched_torch_load
 import torch.nn as nn
 import pytorch_lightning as pl
 from omegaconf import OmegaConf
