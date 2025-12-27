@@ -66,8 +66,8 @@ def main():
     )
     logger.info("Trainer initialized")
 
-    # Strict load pretrianed model
-    if cfg.TRAIN.PRETRAINED:
+    # Strict load pretrained model (for fine-tuning, not resuming)
+    if cfg.TRAIN.PRETRAINED and not cfg.TRAIN.RESUME:
         load_pretrained(cfg, model, logger)
     # model.lm.resize_tokenizer()
 
@@ -81,10 +81,14 @@ def main():
     # model = torch.compile(model)
 
     # Lightning Fitting
+    # RESUME: Continue training from a checkpoint (restores model, optimizer, scheduler, epoch, etc.)
+    # PRETRAINED: Only load model weights (for fine-tuning)
     if cfg.TRAIN.RESUME:
+        resume_path = cfg.TRAIN.RESUME if isinstance(cfg.TRAIN.RESUME, str) and cfg.TRAIN.RESUME not in ['', 'true', 'True'] else cfg.TRAIN.PRETRAINED
+        logger.info(f"Resuming training from checkpoint: {resume_path}")
         trainer.fit(model,
                     datamodule=datamodule,
-                    ckpt_path=cfg.TRAIN.PRETRAINED)
+                    ckpt_path=resume_path)
     else:
         trainer.fit(model, datamodule=datamodule)
 

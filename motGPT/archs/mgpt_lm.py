@@ -7,7 +7,7 @@ import heapq
 import torch
 from torch import Tensor, nn
 from torch.distributions.distribution import Distribution
-from transformers import AutoModelForSeq2SeqLM, T5ForConditionalGeneration, T5Tokenizer, AutoTokenizer, GPT2LMHeadModel, GPT2Tokenizer, LlamaForCausalLM, Qwen3ForCausalLM
+from transformers import AutoModelForSeq2SeqLM, T5ForConditionalGeneration, T5Tokenizer, AutoTokenizer, GPT2LMHeadModel, GPT2Tokenizer, LlamaForCausalLM, AutoModelForCausalLM
 import random
 from typing import Optional
 from .tools.token_emb import NewTokenEmb
@@ -65,10 +65,12 @@ class MLM(nn.Module):
             )
             self.lm_type = 'dec'
         elif model_type == "qwen":
-            self.language_model = Qwen3ForCausalLM.from_pretrained(
+            # Use AutoModelForCausalLM for Qwen models (compatible with all transformers versions)
+            self.language_model = AutoModelForCausalLM.from_pretrained(
                 model_path,
                 torch_dtype=torch.float32,  # Use float32 for training stability
-                low_cpu_mem_usage=True
+                low_cpu_mem_usage=True,
+                trust_remote_code=True  # Required for some Qwen versions
             )
             self.lm_type = 'dec'
         else:

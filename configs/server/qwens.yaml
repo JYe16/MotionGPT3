@@ -36,13 +36,13 @@ LORA:
 TEST:
   CHECKPOINTS: null
   SPLIT: test
-  BATCH_SIZE: 32
+  BATCH_SIZE: 64
   REPLICATIONS: 1
 
 TRAIN:
   STAGE: token_custom
   instruction_type: m2t
-  BATCH_SIZE: 128             # Moderate batch size for 0.6B model
+  BATCH_SIZE: 96             # Moderate batch size for 0.6B model
   END_EPOCH: 100
   LR_SCHEDULER:
     target: CosineAnnealingLR

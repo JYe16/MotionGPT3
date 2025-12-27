@@ -52,6 +52,9 @@ TRAIN:
     params:
       lr: 5e-5               # Lower LR for larger model
       weight_decay: 0.01
+  # RESUME should be the experiment directory, not the checkpoint file
+  # The system will automatically find checkpoints/last.ckpt in this directory
+  RESUME: 'experiments/motgpt_ortho/debug--M2T_LLaMA_Ortho0'
 
 DATASET:
   target: motGPT.data.HumanML3D_custom.HumanML3DDataModuleCustom

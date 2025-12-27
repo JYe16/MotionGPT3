@@ -19,6 +19,11 @@ under model.params.lambda_ortho
 """
 
 import os
+
+# Fix for PyTorch 2.6+ checkpoint loading
+# Must be set BEFORE importing torch
+os.environ["TORCH_FORCE_WEIGHTS_ONLY_LOAD"] = "0"
+
 import torch
 import torch.nn as nn
 import pytorch_lightning as pl
@@ -696,8 +701,8 @@ def main():
     )
     logger.info(f"Trainer initialized with precision={train_precision}, gradient_clip={gradient_clip}")
 
-    # Strict load pretrained model
-    if cfg.TRAIN.PRETRAINED:
+    # Strict load pretrained model (for fine-tuning, not resuming)
+    if cfg.TRAIN.PRETRAINED and not cfg.TRAIN.RESUME:
         load_pretrained(cfg, model, logger)
 
     # Strict load vae model
@@ -705,10 +710,18 @@ def main():
         load_pretrained_vae(cfg, model, logger)
 
     # Lightning Fitting
+    # RESUME: Continue training from a checkpoint (restores model, optimizer, scheduler, epoch, etc.)
+    # PRETRAINED: Only load model weights (for fine-tuning)
+    # Note: resume_config() in config.py sets cfg.TRAIN.PRETRAINED to the actual checkpoint file path
     if cfg.TRAIN.RESUME:
+        # Use cfg.TRAIN.PRETRAINED which was set by resume_config() to the actual .ckpt file
+        resume_path = cfg.TRAIN.PRETRAINED
+        logger.info(f"=" * 60)
+        logger.info(f"Resuming training from checkpoint: {resume_path}")
+        logger.info(f"=" * 60)
         trainer.fit(model,
                     datamodule=datamodule,
-                    ckpt_path=cfg.TRAIN.PRETRAINED)
+                    ckpt_path=resume_path)
     else:
         trainer.fit(model, datamodule=datamodule)
 
