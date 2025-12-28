@@ -2,13 +2,20 @@
 # This config uses LLaMA as the language model backbone instead of GPT2
 # Key feature: Larger model capacity with 2048 hidden size
 
-NAME: M2T_LLaMA_Ortho_CodebookInit
+NAME: M2T_LLaMA_Ortho0
 ACCELERATOR: 'gpu'
 DEVICE: [0]
 NUM_NODES: 1
 
 # Path to VQ-VAE codebook for motion token embedding initialization
 CODEBOOK_PATH: checkpoints/codebook_st_share.pt
+
+TEST:
+  CHECKPOINTS: 'checkpoints/llama1b-ortho0.01-e100.ckpt'
+  # CHECKPOINTS: 'experiments/motgpt_ortho/debug--M2T_Ortho_CodebookInit_LoRA/checkpoints/last-v7.ckpt'
+  SPLIT: test
+  BATCH_SIZE: 64
+  REPLICATIONS: 1
 
 # =====================================================
 # LoRA Configuration for Parameter-Efficient Training
@@ -30,12 +37,6 @@ LORA:
     - k_proj
     - v_proj
     - o_proj
-
-TEST:
-  CHECKPOINTS: null
-  SPLIT: test
-  BATCH_SIZE: 32
-  REPLICATIONS: 1
 
 TRAIN:
   STAGE: token_custom
@@ -60,7 +61,7 @@ DATASET:
     ROOT: /home/jackieye/code/llm-sensing/data/humanml3d_263/
     FPS: 20
     MIN_MOTION_LEN: 20
-    MAX_MOTION_LEN: 200
+    MAX_MOTION_LEN: 196
 
 model:
   target: motGPT.models.motgpt_ortho.MotGPTOrtho
@@ -91,8 +92,8 @@ LOSS:
 
 METRIC:
   TASK: 'm2t'
-  TYPE: []
-  # TYPE: ['M2TMetrics']
+  # TYPE: []
+  TYPE: ['M2TMetrics']
 
 LOGGER:
   TYPE: ['tensorboard']

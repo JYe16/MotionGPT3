@@ -34,9 +34,9 @@ LORA:
     - o_proj
 
 TEST:
-  CHECKPOINTS: null
+  CHECKPOINTS: checkpoints/qwens-ortho0.01.ckpt
   SPLIT: test
-  BATCH_SIZE: 32
+  BATCH_SIZE: 64
   REPLICATIONS: 1
 
 TRAIN:
@@ -62,7 +62,7 @@ DATASET:
     ROOT: /home/jackieye/code/llm-sensing/data/humanml3d_263/
     FPS: 20
     MIN_MOTION_LEN: 20
-    MAX_MOTION_LEN: 200
+    MAX_MOTION_LEN: 196
 
 model:
   target: motGPT.models.motgpt_ortho.MotGPTOrtho
@@ -93,8 +93,8 @@ LOSS:
 
 METRIC:
   TASK: 'm2t'
-  TYPE: []
-  # TYPE: ['M2TMetrics']
+#  TYPE: []
+  TYPE: ['M2TMetrics']
 
 LOGGER:
   TYPE: ['tensorboard']
