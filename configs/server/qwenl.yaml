@@ -10,7 +10,7 @@
 #   - Gradient checkpointing
 #   - Lower batch size
 
-NAME: M2T_Qwen3_8B_Ortho_CodebookInit
+NAME: M2T_QwenL_Ortho0.01
 ACCELERATOR: 'gpu'
 DEVICE: [0]
 NUM_NODES: 1
@@ -48,7 +48,7 @@ TEST:
 TRAIN:
   STAGE: token_custom
   instruction_type: m2t
-  BATCH_SIZE: 64              # Small batch size due to large model
+  BATCH_SIZE: 32              # Small batch size due to large model
   END_EPOCH: 100
   accumulate_grad_batches: 4 # Effective batch size = 4 * 4 = 16
   LR_SCHEDULER:
@@ -59,7 +59,7 @@ TRAIN:
   OPTIM:
     target: AdamW
     params:
-      lr: 2e-5               # Lower LR for large model stability
+      lr: 1e-4               # Lower LR for large model stability
       weight_decay: 0.01
 
 DATASET:

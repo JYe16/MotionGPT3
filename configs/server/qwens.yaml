@@ -54,6 +54,7 @@ TRAIN:
     params:
       lr: 5e-5               # Lower LR for stability
       weight_decay: 0.01
+  RESUME: 'experiments/motgpt_ortho/debug--M2T_Qwen3_0'
 
 DATASET:
   target: motGPT.data.HumanML3D_custom.HumanML3DDataModuleCustom

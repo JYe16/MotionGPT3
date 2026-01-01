@@ -1,6 +1,70 @@
 import os
+import csv
 from pytorch_lightning import LightningModule, Trainer
 from pytorch_lightning.callbacks import Callback, RichProgressBar, ModelCheckpoint
+
+
+class LossCSVLogger(Callback):
+    """
+    Callback to log total loss and orthogonality loss at each epoch end
+    and save to a CSV file when training completes.
+    """
+    
+    def __init__(self, output_dir: str, filename: str = "epoch_losses.csv"):
+        """
+        Args:
+            output_dir: Directory where the CSV file will be saved
+            filename: Name of the CSV file (default: epoch_losses.csv)
+        """
+        super().__init__()
+        self.output_dir = output_dir
+        self.filename = filename
+        self.epoch_losses = []  # List of dicts: {epoch, total_loss, ortho_loss}
+    
+    def on_train_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        """Record losses at the end of each training epoch."""
+        epoch = trainer.current_epoch
+        metrics = trainer.callback_metrics
+        
+        # Get total loss (logged as "total/train" by MotLosses)
+        total_loss = metrics.get("total/train", None)
+        if total_loss is not None:
+            total_loss = total_loss.item() if hasattr(total_loss, 'item') else float(total_loss)
+        
+        # Get orthogonality loss (logged as "train/ortho_loss_epoch")
+        ortho_loss = metrics.get("train/ortho_loss_epoch", None)
+        if ortho_loss is None:
+            # Try alternative key
+            ortho_loss = metrics.get("train/ortho_loss", None)
+        if ortho_loss is not None:
+            ortho_loss = ortho_loss.item() if hasattr(ortho_loss, 'item') else float(ortho_loss)
+        else:
+            ortho_loss = 0.0  # Default to 0 if not found (lambda_ortho might be 0)
+        
+        self.epoch_losses.append({
+            "epoch": epoch,
+            "total_loss": total_loss,
+            "ortho_loss": ortho_loss
+        })
+        
+        # Also log to console for visibility
+        if trainer.global_rank == 0:
+            print(f"[LossCSVLogger] Epoch {epoch}: total_loss={total_loss}, ortho_loss={ortho_loss}")
+    
+    def on_train_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        """Save all recorded losses to CSV when training ends."""
+        if trainer.global_rank != 0:
+            return  # Only save on rank 0 to avoid duplicate writes
+        
+        os.makedirs(self.output_dir, exist_ok=True)
+        csv_path = os.path.join(self.output_dir, self.filename)
+        
+        with open(csv_path, 'w', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=["epoch", "total_loss", "ortho_loss"])
+            writer.writeheader()
+            writer.writerows(self.epoch_losses)
+        
+        print(f"[LossCSVLogger] Saved epoch losses to: {csv_path}")
 
 
 def build_callbacks(cfg, logger=None, phase='test', **kwargs):

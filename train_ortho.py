@@ -44,7 +44,7 @@ torch.load = _patched_torch_load
 import torch.nn as nn
 import pytorch_lightning as pl
 from omegaconf import OmegaConf
-from motGPT.callback import build_callbacks
+from motGPT.callback import build_callbacks, LossCSVLogger
 from motGPT.config import parse_args, instantiate_from_config
 from motGPT.data.build_data import build_data
 from motGPT.models.build_model import build_model
@@ -610,6 +610,15 @@ def main():
 
     # Callbacks
     callbacks = build_callbacks(cfg, logger=logger, phase='train')
+    
+    # Add LossCSVLogger callback to record epoch losses
+    loss_csv_logger = LossCSVLogger(
+        output_dir=cfg.FOLDER_EXP,
+        filename="epoch_losses.csv"
+    )
+    callbacks.append(loss_csv_logger)
+    logger.info(f"LossCSVLogger will save to: {cfg.FOLDER_EXP}/epoch_losses.csv")
+    
     logger.info("Callbacks initialized")
 
     # Dataset
