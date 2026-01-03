@@ -2,7 +2,7 @@
 # This config uses MotGPTOrtho model to encourage orthogonal motion token embeddings
 # Key feature: Initialize motion token embeddings from VQ-VAE codebook via sparse projection
 
-NAME: M2T_Ortho_1
+NAME: M2T_Ortho_0
 ACCELERATOR: 'gpu'
 DEVICE: [0]
 NUM_NODES: 1
@@ -37,7 +37,7 @@ TEST:
 TRAIN:
   STAGE: token_custom
   instruction_type: m2t
-  BATCH_SIZE: 128
+  BATCH_SIZE: 320
   END_EPOCH: 100
   LR_SCHEDULER:
     target: CosineAnnealingLR
@@ -64,7 +64,7 @@ model:
   params:
     condition: 'motion'
     task: 'm2t'
-    lambda_ortho: 1
+    lambda_ortho: 0
     lm:
       target: motGPT.archs.mgpt_lm.MLM
       params:

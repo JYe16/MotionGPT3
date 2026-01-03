@@ -633,6 +633,7 @@ def main():
     # =====================================================
     # NEW: Initialize motion token embeddings from VQ-VAE codebook
     # =====================================================
+    codebook_init_enabled = cfg.get('CODEBOOK_INIT_ENABLED', True)  # Default: enabled
     codebook_path = cfg.get('CODEBOOK_PATH', 'checkpoints/codebook_st_share.pt')
     
     # Determine model type and original vocab size
@@ -645,8 +646,13 @@ def main():
         original_vocab_size = 151936  # Qwen3 vocab size
     else:
         original_vocab_size = 50257  # Default to GPT2
-        
-    if os.path.exists(codebook_path):
+    
+    if not codebook_init_enabled:
+        logger.info(f"="*60)
+        logger.info(f"CODEBOOK_INIT_ENABLED=False: Skipping codebook initialization")
+        logger.info(f"Using default random initialization for motion token embeddings")
+        logger.info(f"="*60)
+    elif os.path.exists(codebook_path):
         try:
             # Load VQ-VAE codebook weights
             codebook_weight = load_vqvae_codebook(codebook_path, logger)

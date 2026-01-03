@@ -2,13 +2,13 @@
 # This config uses MotGPTOrtho model to encourage orthogonal motion token embeddings
 # Key feature: Initialize motion token embeddings from VQ-VAE codebook via sparse projection
 
-NAME: M2T_Ortho0.1
+NAME: M2T_Ortho1e-2_NoInit
 ACCELERATOR: 'gpu'
 DEVICE: [0]
 NUM_NODES: 1
 
-# Path to VQ-VAE codebook for motion token embedding initialization
-CODEBOOK_PATH: checkpoints/codebook_st_share.pt
+# Path to VQ-VAE codebook for motion token embedding initialization# Set CODEBOOK_INIT_ENABLED to false to use random initialization instead of sparse projection
+CODEBOOK_INIT_ENABLED: false  # Default: true (use codebook sparse projection init)# CODEBOOK_PATH: checkpoints/codebook_st_share.pt
 
 # =====================================================
 # LoRA Configuration for Parameter-Efficient Training
@@ -37,7 +37,7 @@ TEST:
 TRAIN:
   STAGE: token_custom
   instruction_type: m2t
-  BATCH_SIZE: 128
+  BATCH_SIZE: 336
   END_EPOCH: 100
   LR_SCHEDULER:
     target: CosineAnnealingLR
@@ -64,7 +64,7 @@ model:
   params:
     condition: 'motion'
     task: 'm2t'
-    lambda_ortho: 0.1
+    lambda_ortho: 1e-2
     lm:
       target: motGPT.archs.mgpt_lm.MLM
       params:
